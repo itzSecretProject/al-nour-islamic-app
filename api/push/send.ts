@@ -21,8 +21,6 @@ interface PushRecord {
 
 const EC_ID = process.env.EC_ID;
 const EC_READ_TOKEN = process.env.EC_READ_TOKEN;
-const EC_WRITE_TOKEN = process.env.VERCEL_API_TOKEN;
-const EC_TEAM = process.env.VERCEL_TEAM_ID;
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -234,16 +232,6 @@ async function ecReadAll(): Promise<Record<string, any>> {
   return res.json();
 }
 
-async function ecPatch(items: any[]) {
-  if (items.length === 0) return;
-  const url = `https://api.vercel.com/v1/edge-config/${EC_ID}/items${EC_TEAM ? `?teamId=${EC_TEAM}` : ''}`;
-  await fetch(url, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${EC_WRITE_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items }),
-  }).catch(() => {});
-}
-
 // ── Supabase dedup ────────────────────────────────────────────────────────────
 
 async function claimPrayerSend(dedupKey: string): Promise<boolean> {
@@ -272,6 +260,82 @@ async function claimPrayerSend(dedupKey: string): Promise<boolean> {
   }
 }
 
+// ── Supabase Storage as push-state store ──────────────────────────────────────
+// Edge Config on Hobby caps writes at 250/month, which the per-trigger heartbeat
+// + dedup writes exhaust in hours (then ALL writes fail for ~30 days). Supabase
+// Storage has no such cap, so device records + heartbeat live here instead.
+// Bucket `push-dedup`, prefix `state/`. Reads from Edge Config are kept as a
+// free, unlimited legacy fallback until each device re-subscribes.
+
+const SB_BUCKET = 'push-dedup';
+const STATE_PREFIX = 'state/';
+
+function sbHeaders() {
+  return { apikey: SUPABASE_SERVICE_KEY as string, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+}
+
+async function sbList(prefix: string): Promise<string[]> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return [];
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${SB_BUCKET}`, {
+      method: 'POST',
+      headers: { ...sbHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefix, limit: 1000 }),
+    });
+    if (!res.ok) return [];
+    const arr = await res.json();
+    return Array.isArray(arr) ? arr.map((o: any) => o.name).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+async function sbGet(path: string): Promise<any | null> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${SB_BUCKET}/${path}`, { headers: sbHeaders() });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function sbPut(path: string, obj: any): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${SB_BUCKET}/${path}`, {
+      method: 'POST',
+      headers: { ...sbHeaders(), 'Content-Type': 'application/json', 'x-upsert': 'true' },
+      body: JSON.stringify(obj),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+async function sbDelete(path: string): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+  try {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${SB_BUCKET}/${path}`, { method: 'DELETE', headers: sbHeaders() });
+  } catch {}
+}
+
+// Read every device record, merging legacy Edge Config (free reads) with the
+// Supabase Storage state. Supabase wins when a device exists in both.
+async function readAllDevices(): Promise<Record<string, PushRecord>> {
+  const out: Record<string, PushRecord> = {};
+  try {
+    const ec = await ecReadAll();
+    for (const k of Object.keys(ec)) {
+      if (k.startsWith('sub_') && ec[k]?.subscription) out[k] = ec[k];
+    }
+  } catch {}
+  const names = await sbList(STATE_PREFIX);
+  await Promise.all(
+    names.filter(n => n.startsWith('sub_')).map(async (n) => {
+      const rec = await sbGet(`${STATE_PREFIX}${n}`);
+      if (rec?.subscription) out[n.replace(/\.json$/, '')] = rec;
+    }),
+  );
+  return out;
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export default async function handler(req: any, res: any) {
@@ -285,13 +349,13 @@ export default async function handler(req: any, res: any) {
 
   webpush.setVapidDetails('mailto:adamelouinissi@gmail.com', vapidPublic, vapidPrivate);
 
-  const items = await ecReadAll();
-  const subKeys = Object.keys(items).filter(k => k.startsWith('sub_'));
+  const devices = await readAllDevices();
+  const subKeys = Object.keys(devices);
 
   if (req.query?.test === '1') {
     let ok = 0, bad = 0;
     await Promise.all(subKeys.map(async (key) => {
-      const record = items[key] as PushRecord;
+      const record = devices[key];
       if (!record?.subscription) return;
       try {
         await webpush.sendNotification(
@@ -307,13 +371,15 @@ export default async function handler(req: any, res: any) {
 
   const now = Date.now();
   let sent = 0, errors = 0;
-  const staleKeys: string[] = [];
-  const updates: { operation: 'upsert'; key: string; value: PushRecord }[] = [];
   const debug = req.query?.debug === '1';
   const diag: any[] = [];
 
+  // Collected Supabase Storage writes (unlimited, unlike Edge Config's 250/mo cap).
+  const toWrite: { key: string; value: PushRecord }[] = [];
+  const toDelete: string[] = [];
+
   await Promise.all(subKeys.map(async (key) => {
-    const record = items[key] as PushRecord;
+    const record = devices[key];
     if (!record?.subscription || !Array.isArray(record.schedule)) return;
 
     const fired = new Set<number>(Array.isArray(record.fired) ? record.fired : []);
@@ -330,7 +396,7 @@ export default async function handler(req: any, res: any) {
         daysLeft,
         next: future[0] ? new Date(future[0].ts).toISOString() : null,
         nextPrayer: future[0]?.prayer ?? null,
-        hasCoords: !!(record.lat && record.lng),
+        hasCoords: record.lat != null && record.lng != null,
       });
     }
 
@@ -359,11 +425,11 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    if (dead) { staleKeys.push(key); return; }
+    if (dead) { toDelete.push(key); return; }
 
-    // ── Auto-rebuild: if fewer than REBUILD_TRIGGER_DAYS of future entries remain,
-    // fetch fresh prayer times from the Aladhan API and replenish the schedule.
-    // This keeps notifications running indefinitely without the user opening the app.
+    // ── Auto-rebuild: when fewer than REBUILD_TRIGGER_DAYS of future entries
+    // remain, fetch fresh prayer times from Aladhan and replenish the schedule.
+    // Keeps notifications running indefinitely without the app being opened.
     const futureEntries = record.schedule.filter(e => e.ts > now);
     const lastFutureTs = futureEntries.length
       ? futureEntries.reduce((mx, e) => Math.max(mx, e.ts), 0)
@@ -374,35 +440,32 @@ export default async function handler(req: any, res: any) {
       const rebuilt = await fetchAndRebuildSchedule(record, now);
       if (rebuilt && rebuilt.length > 0) {
         const prunedFired = [...fired].filter(ts => ts > now - FIRED_TTL_MS);
-        updates.push({ operation: 'upsert', key, value: { ...record, schedule: rebuilt, fired: prunedFired } });
-        return; // schedule updated, skip the regular prune-only update
+        toWrite.push({ key, value: { ...record, schedule: rebuilt, fired: prunedFired } });
+        return;
       }
     }
 
     if (changed) {
       const prunedFired = [...fired].filter(ts => ts > now - FIRED_TTL_MS);
       const prunedSchedule = record.schedule.filter(e => e.ts > now - GRACE_MS);
-      updates.push({ operation: 'upsert', key, value: { ...record, fired: prunedFired, schedule: prunedSchedule } });
+      toWrite.push({ key, value: { ...record, fired: prunedFired, schedule: prunedSchedule } });
     }
   }));
 
-  const heartbeatUpdate = debug
-    ? []
-    : [{ operation: 'upsert' as const, key: 'meta_heartbeat', value: { ts: now, sent } }];
-
-  await ecPatch([
-    ...updates,
-    ...heartbeatUpdate,
-    ...staleKeys.map(k => ({ operation: 'delete' as const, key: k })),
+  // Persist all changes to Supabase Storage (no Edge Config write-quota limits).
+  await Promise.all([
+    ...toWrite.map(u => sbPut(`${STATE_PREFIX}${u.key}.json`, u.value)),
+    ...toDelete.map(k => sbDelete(`${STATE_PREFIX}${k}.json`)),
+    debug ? Promise.resolve() : sbPut(`${STATE_PREFIX}_heartbeat.json`, { ts: now, sent }),
   ]);
 
-  const hb = items['meta_heartbeat'];
+  const hb = await sbGet(`${STATE_PREFIX}_heartbeat.json`);
   res.status(200).json({
     ok: true,
     devices: subKeys.length,
     sent,
     errors,
-    stale: staleKeys.length,
+    stale: toDelete.length,
     serverTime: new Date(now).toISOString(),
     lastTriggerAgoSec: hb?.ts ? Math.round((now - hb.ts) / 1000) : null,
     ...(debug ? { diag } : {}),
