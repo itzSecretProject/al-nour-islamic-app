@@ -93,24 +93,57 @@ function isInSilentHours(hour: number, start: number, end: number): boolean {
   return hour >= start && hour < end;
 }
 
+// ── Timezone-correct wall-clock → UTC conversion ──────────────────────────────
+// The Aladhan times are wall-clock in the PRAYER LOCATION's timezone. The server
+// runs in UTC, so we must convert using the location's IANA timezone (DST-safe),
+// otherwise notifications land hours off. The browser client avoids this because
+// it already runs in the user's local timezone.
+
+function tzOffsetMs(utcMs: number, tz: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = dtf.formatToParts(new Date(utcMs));
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  const asUTC = Date.UTC(+map.year, +map.month - 1, +map.day, +map.hour, +map.minute, +map.second);
+  return asUTC - utcMs;
+}
+
+// Convert a wall-clock time in `tz` to a UTC timestamp (handles DST boundaries).
+function zonedWallTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, tz: string): number {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  const off1 = tzOffsetMs(guess, tz);
+  let utc = guess - off1;
+  const off2 = tzOffsetMs(utc, tz);
+  if (off2 !== off1) utc = guess - off2;
+  return utc;
+}
+
+// What weekday (0=Sun..6=Sat) is this Y/M/D? Calendar date only — no tz needed.
+function weekdayOf(y: number, mo: number, d: number): number {
+  return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+}
+
 // ── Server-side schedule builder ──────────────────────────────────────────────
 
-function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number): ScheduleEntry[] {
+function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number, tz: string): ScheduleEntry[] {
   const lang = record.language || 'es';
   const horizon = now + REBUILD_HORIZON_DAYS * 24 * 60 * 60 * 1000;
   const preMin = record.preAlertMinutes ?? 0;
   const offsets = record.offsets ?? {};
   const schedule: ScheduleEntry[] = [];
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
 
   for (const dayData of monthlyData) {
     const greg = dayData?.date?.gregorian;
     if (!greg) continue;
-    const monthNum = typeof greg.month === 'object' ? parseInt(greg.month?.number) : parseInt(greg.month);
-    const baseDate = new Date(parseInt(greg.year), monthNum - 1, parseInt(greg.day));
-    if (baseDate < today) continue;
-    const isFriday = baseDate.getDay() === 5;
+    const y = parseInt(greg.year);
+    const mo = typeof greg.month === 'object' ? parseInt(greg.month?.number) : parseInt(greg.month);
+    const d = parseInt(greg.day);
+    if (isNaN(y) || isNaN(mo) || isNaN(d)) continue;
+    const isFriday = weekdayOf(y, mo, d) === 5;
 
     for (const prayer of PRAYER_NAMES) {
       const timeStr = dayData.timings?.[prayer];
@@ -119,13 +152,12 @@ function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number
       const [h, m] = clean.split(':').map(Number);
       if (isNaN(h) || isNaN(m)) continue;
 
-      const prayerDate = new Date(baseDate);
-      prayerDate.setHours(h, m, 0, 0);
-
-      const mainTs = prayerDate.getTime() + (offsets[prayer] ?? 0) * 60_000;
+      const rawTs = zonedWallTimeToUtc(y, mo, d, h, m, tz);
+      const mainTs = rawTs + (offsets[prayer] ?? 0) * 60_000;
       if (mainTs <= now || mainTs > horizon) continue;
 
-      const prayerHour = new Date(mainTs).getHours();
+      // Silent-hours check uses the local wall hour at the prayer location.
+      const prayerHour = Math.floor(((mainTs + tzOffsetMs(mainTs, tz)) % 86_400_000) / 3_600_000);
       const silent = (record.silentHoursEnabled ?? false) && prayer !== 'Fajr'
         && isInSilentHours(prayerHour, record.silentHoursStart ?? 23, record.silentHoursEnd ?? 5);
 
@@ -138,7 +170,7 @@ function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number
         schedule.push({ prayer, ts: mainTs, title: NOTIF_TITLES[lang] ?? NOTIF_TITLES.en, body });
 
         if (preMin > 0) {
-          const preTs = prayerDate.getTime() - preMin * 60_000;
+          const preTs = rawTs - preMin * 60_000;
           if (preTs > now && preTs <= horizon) {
             const preBody = (PRE_BODIES[lang] ?? PRE_BODIES.en)(localName, preMin);
             schedule.push({ prayer: `${prayer}_pre`, ts: preTs, title: NOTIF_TITLES[lang] ?? NOTIF_TITLES.en, body: preBody });
@@ -147,8 +179,8 @@ function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number
       }
 
       if (isFriday && prayer === 'Dhuhr' && (record.jumuahReminder ?? true)) {
-        const jumuahTs = prayerDate.getTime() - 30 * 60_000;
-        const jHour = new Date(jumuahTs).getHours();
+        const jumuahTs = rawTs - 30 * 60_000;
+        const jHour = Math.floor(((jumuahTs + tzOffsetMs(jumuahTs, tz)) % 86_400_000) / 3_600_000);
         const jSilent = (record.silentHoursEnabled ?? false)
           && isInSilentHours(jHour, record.silentHoursStart ?? 23, record.silentHoursEnd ?? 5);
         if (!jSilent && jumuahTs > now && jumuahTs <= horizon) {
@@ -167,10 +199,11 @@ function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number
 }
 
 async function fetchAndRebuildSchedule(record: PushRecord, now: number): Promise<ScheduleEntry[] | null> {
-  if (!record.lat || !record.lng) return null;
+  if (record.lat == null || record.lng == null) return null;
   try {
     const method = record.method ?? 2;
     const months: any[] = [];
+    let tz = '';
     const d = new Date(now);
     for (let i = 0; i < 2; i++) {
       const y = d.getFullYear();
@@ -179,11 +212,14 @@ async function fetchAndRebuildSchedule(record: PushRecord, now: number): Promise
       const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
       if (!res.ok) { d.setMonth(d.getMonth() + 1); continue; }
       const json = await res.json();
-      if (Array.isArray(json.data)) months.push(...json.data);
+      if (Array.isArray(json.data)) {
+        months.push(...json.data);
+        if (!tz) tz = json.data[0]?.meta?.timezone || '';
+      }
       d.setMonth(d.getMonth() + 1);
     }
-    if (!months.length) return null;
-    const rebuilt = buildServerSchedule(months, record, now);
+    if (!months.length || !tz) return null;
+    const rebuilt = buildServerSchedule(months, record, now, tz);
     return rebuilt.length ? rebuilt : null;
   } catch {
     return null;

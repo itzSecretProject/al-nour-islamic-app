@@ -11,26 +11,24 @@ import 'leaflet/dist/leaflet.css';
 
 const PERMISSION_KEY = 'compassPermissionGranted';
 
-function rhumbDestination(lat: number, lon: number, bearingDeg: number, distKm: number): [number, number] {
-  const R = 6371;
-  const d = distKm / R;
-  const b = bearingDeg * Math.PI / 180;
-  const φ1 = lat * Math.PI / 180;
-  const λ1 = lon * Math.PI / 180;
-  const Δφ = d * Math.cos(b);
-  const φ2 = φ1 + Δφ;
-  const Δψ = Math.log(Math.tan(φ2 / 2 + Math.PI / 4) / Math.tan(φ1 / 2 + Math.PI / 4));
-  const q = Math.abs(Δψ) > 1e-10 ? Δφ / Δψ : Math.cos(φ1);
-  const λ2 = λ1 + (d * Math.sin(b)) / q;
-  return [φ2 * 180 / Math.PI, ((λ2 * 180 / Math.PI) + 540) % 360 - 180];
-}
-
-// Multiple waypoints along the rhumb line so Leaflet's SVG buffer doesn't clip
-// the polyline early when the far endpoint is well outside the viewport.
-function rhumbPath(lat: number, lon: number, bearingDeg: number, totalKm: number, n = 20): [number, number][] {
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= n; i++) pts.push(rhumbDestination(lat, lon, bearingDeg, (totalKm * i) / n));
-  return pts;
+// Compute the Qibla line as a 2-point segment from the user to just beyond the
+// current viewport edge, in the exact bearing direction.
+//
+// Key insight: on Web Mercator (Leaflet's projection) a constant-bearing rhumb
+// line is a perfectly STRAIGHT line, and because the projection is conformal and
+// meridians are vertical, that straight line sits at exactly `bearing°` clockwise
+// from screen-up. So we can place the far endpoint in pixel space at the bearing
+// angle and unproject it — no great-circle curve, and because the endpoint is
+// only just off-screen it is never clipped by Leaflet's SVG buffer at any zoom.
+function qiblaLinePoints(map: L.Map, userPos: [number, number], bearingDeg: number): [number, number][] {
+  const θ = bearingDeg * Math.PI / 180;
+  const userPt = map.latLngToContainerPoint(userPos);
+  const size = map.getSize();
+  // Far enough to always exit the viewport (full diagonal + margin).
+  const far = size.x + size.y + 256;
+  const endPt = userPt.add(L.point(Math.sin(θ), -Math.cos(θ)).multiplyBy(far));
+  const endLatLng = map.containerPointToLatLng(endPt);
+  return [userPos, [endLatLng.lat, endLatLng.lng]];
 }
 
 interface QiblaScreenProps {
@@ -324,24 +322,30 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     const userMarker = L.marker(userPos, { icon: userIcon }).addTo(map);
     userMarkerRef.current = userMarker;
 
-    // Rhumb-line ray: 20 intermediate waypoints over 600 km so Leaflet's SVG
-    // clip buffer never truncates the visible segment regardless of zoom level.
+    // Qibla ray — drawn to the viewport edge and redrawn on every pan/zoom so it
+    // always reaches the screen edge in the exact bearing, never clipped.
     const qibla = getQiblaDirection(latitude!, longitude!);
-    const pathPts = rhumbPath(latitude!, longitude!, qibla, 600, 20);
-    const polyline = L.polyline(pathPts, {
+    const polyline = L.polyline(qiblaLinePoints(map, userPos, qibla), {
       color: '#3B82F6',
       weight: 4,
       opacity: 1,
     }).addTo(map);
     polylineRef.current = polyline;
 
+    const redrawQiblaLine = () => {
+      if (polylineRef.current) {
+        polylineRef.current.setLatLngs(qiblaLinePoints(map, userPos, qibla));
+      }
+    };
+    map.on('move zoom zoomend moveend resize', redrawQiblaLine);
+
     // The map often mounts while the screen is still animating in (container has
     // zero size) → Leaflet renders blank tiles. Force a re-measure a few times
     // and whenever the container resizes so tiles always paint.
-    const fixSize = () => map.invalidateSize();
+    const fixSize = () => { map.invalidateSize(); redrawQiblaLine(); };
     const t1 = setTimeout(fixSize, 250);
     const t2 = setTimeout(fixSize, 650);
-    const ro = new ResizeObserver(() => map.invalidateSize());
+    const ro = new ResizeObserver(() => { map.invalidateSize(); redrawQiblaLine(); });
     ro.observe(mapContainerRef.current);
 
     setMapLoaded(true);
@@ -350,6 +354,7 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
       clearTimeout(t1);
       clearTimeout(t2);
       ro.disconnect();
+      map.off('move zoom zoomend moveend resize', redrawQiblaLine);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
