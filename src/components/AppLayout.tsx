@@ -69,6 +69,22 @@ export function AppLayout({ children, activeTab, setActiveTab }: AppLayoutProps)
         return {
           background: 'linear-gradient(135deg, #121214 0%, #1e1e24 50%, #0a0a0c 100%)',
         };
+      case 'midnight':
+        return {
+          background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #020617 100%)',
+        };
+      case 'plum':
+        return {
+          background: 'linear-gradient(135deg, #2E1065 0%, #4C1D95 50%, #1E1B4B 100%)',
+        };
+      case 'rose':
+        return {
+          background: 'linear-gradient(135deg, #4C0519 0%, #881337 50%, #1F0A14 100%)',
+        };
+      case 'ocean':
+        return {
+          background: 'linear-gradient(135deg, #042F2E 0%, #0E7490 50%, #022027 100%)',
+        };
       case 'emerald':
       default:
         return {

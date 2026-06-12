@@ -15,18 +15,16 @@ export function useBackgroundDownloader() {
     abortControllerRef.current = abortController;
 
     const checkWifiAndDownload = async () => {
-      // Helper to check if the connection is active and unmetered (Wi-Fi)
+      // Auto-download on any active connection. We only back off when the user has
+      // explicitly turned on data-saver (saveData) — otherwise the Quran caches
+      // itself locally in the background without the user lifting a finger.
       const isConnectionFriendly = () => {
         if (abortController.signal.aborted) return false;
         if (typeof navigator === 'undefined') return false;
         if (!navigator.onLine) return false;
-        
+
         const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-        if (conn) {
-          if (conn.saveData) return false;
-          // If we have access to connection type, allow Wi-Fi and ethernet only.
-          if (conn.type && conn.type !== 'wifi' && conn.type !== 'ethernet') return false;
-        }
+        if (conn && conn.saveData) return false; // respect Data Saver
         return true;
       };
 
@@ -48,7 +46,9 @@ export function useBackgroundDownloader() {
           return;
         }
 
-        const cache = await caches.open('al-nour-audio-v3');
+        // Must match the Service Worker's AUDIO_CACHE_NAME, or the SW purges these
+        // entries on activation and playback can't find them offline.
+        const cache = await caches.open('al-nour-audio-v4');
 
         // Loop through remaining surahs
         for (let sNum = startSurah; sNum <= 114; sNum++) {

@@ -31,6 +31,8 @@ export function QuranScreen() {
   const [playingAyah, setPlayingAyah] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlsRef = useRef<string[]>([]);
+  // url → object-URL cache so the next ayah is ready before the current ends (gapless).
+  const prefetchRef = useRef<Map<string, string>>(new Map());
   
   const [showTransliteration, setShowTransliteration] = useState(true);
   const [showTranslation, setShowTranslation] = useState(true);
@@ -200,7 +202,7 @@ export function QuranScreen() {
     const audioEdition = data.find(d => d.edition.format === 'audio');
     if (!audioEdition) return;
     try {
-      const cache = await caches.open('al-nour-audio-v3');
+      const cache = await caches.open('al-nour-audio-v4');
       let allExist = true;
       for (const ayah of audioEdition.ayahs) {
         if (ayah.audio) {
@@ -226,6 +228,7 @@ export function QuranScreen() {
   const clearBlobUrls = () => {
     blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
     blobUrlsRef.current = [];
+    prefetchRef.current.clear();
   };
 
   const openSurah = (num: number) => {
@@ -250,7 +253,7 @@ export function QuranScreen() {
     
     const ayahs = audioEdition.ayahs;
     try {
-      const cache = await caches.open('al-nour-audio-v3');
+      const cache = await caches.open('al-nour-audio-v4');
       let successCount = 0;
       const total = ayahs.filter(a => a.audio).length;
       
@@ -280,6 +283,26 @@ export function QuranScreen() {
     }
   };
 
+  // Return an object-URL for the audio, reusing a prefetched one when available so
+  // playback can start instantly (no fetch/decode gap between ayahs).
+  const getBlobUrl = async (url: string): Promise<string> => {
+    const cached = prefetchRef.current.get(url);
+    if (cached) return cached;
+    // Fetch via the service worker and play from a Blob URL to dodge Safari range bugs.
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    blobUrlsRef.current.push(blobUrl);
+    prefetchRef.current.set(url, blobUrl);
+    return blobUrl;
+  };
+
+  // Warm the cache for the next ayah while the current one is still playing.
+  const prefetchAudio = (url: string | undefined) => {
+    if (!url || prefetchRef.current.has(url)) return;
+    getBlobUrl(url).catch(() => {});
+  };
+
   const playAudio = async (ayahNum: number, audioUrl: string | undefined) => {
     if (!audioUrl) return;
 
@@ -292,37 +315,33 @@ export function QuranScreen() {
     if (audioRef.current) {
       audioRef.current.pause();
     }
-    
+
     try {
       setPlayingAyah(ayahNum);
-      
-      // Fetch the audio (intercepted by service worker) and play via Blob URL to fix Safari range bugs
-      const response = await fetch(audioUrl);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      blobUrlsRef.current.push(blobUrl);
-      
+
+      const blobUrl = await getBlobUrl(audioUrl);
+
       const audio = new Audio(blobUrl);
+      audio.preload = 'auto';
       audioRef.current = audio;
-      
+
+      // Prefetch the next ayah NOW so onended can chain to it with no gap.
+      const audioEdition = surahData?.find(d => d.edition.format === 'audio');
+      const nextAyah = audioEdition?.ayahs.find(a => a.numberInSurah === ayahNum + 1);
+      prefetchAudio(nextAyah?.audio);
+
       audio.onended = () => {
-         if (!autoplayRef.current) {
-           setPlayingAyah(null);
-           return;
-         }
-         const audioEdition = surahData?.find(d => d.edition.format === 'audio');
-         if (surahData && audioEdition) {
-           const nextAyah = audioEdition.ayahs.find(a => a.numberInSurah === ayahNum + 1);
-           if (nextAyah && nextAyah.audio) {
-              playAudio(ayahNum + 1, nextAyah.audio);
-           } else {
-              setPlayingAyah(null);
-           }
-         } else {
-           setPlayingAyah(null);
-         }
+        if (!autoplayRef.current) {
+          setPlayingAyah(null);
+          return;
+        }
+        if (nextAyah && nextAyah.audio) {
+          playAudio(ayahNum + 1, nextAyah.audio);
+        } else {
+          setPlayingAyah(null);
+        }
       };
-      
+
       audio.play().catch(err => {
         console.error("Playback start interrupted:", err);
         setPlayingAyah(null);

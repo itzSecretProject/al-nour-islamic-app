@@ -1154,6 +1154,10 @@ export function SettingsScreen() {
                   { id: 'navy_gold', label: t.wpNavyGold },
                   { id: 'charcoal', label: t.wpCharcoal },
                   { id: 'emerald', label: t.wpEmerald },
+                  { id: 'midnight', label: t.wpMidnight },
+                  { id: 'plum', label: t.wpPlum },
+                  { id: 'rose', label: t.wpRose },
+                  { id: 'ocean', label: t.wpOcean },
                 ].map(wp => (
                   <button
                     key={wp.id}

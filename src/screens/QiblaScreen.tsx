@@ -11,27 +11,42 @@ import 'leaflet/dist/leaflet.css';
 
 const PERMISSION_KEY = 'compassPermissionGranted';
 
-// Compute the Qibla line as a straight segment from the user, aimed exactly at
-// the Kaaba's position on the map, extended to (or stopping at) the Kaaba.
+// Great-circle (geodesic) path from the user to the Kaaba.
 //
-// We aim at the Kaaba's PROJECTED pixel position rather than at a compass bearing
-// angle: on a flat Mercator map a line drawn at the great-circle bearing angle does
-// NOT visually reach Mecca (the projection distorts direction with distance). By
-// pointing at the Kaaba's actual screen position the line always visibly points at
-// — and passes through — the Kaaba marker. The endpoint is clamped to the viewport
-// edge so the SVG buffer never clips it, but never overshoots past the Kaaba.
-function qiblaLinePoints(map: L.Map, userPos: [number, number], meccaPos: [number, number]): [number, number][] {
-  const userPt = map.latLngToContainerPoint(userPos);
-  const meccaPt = map.latLngToContainerPoint(meccaPos);
-  const dx = meccaPt.x - userPt.x;
-  const dy = meccaPt.y - userPt.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const size = map.getSize();
-  // Far enough to always exit the viewport, but never beyond the Kaaba itself.
-  const far = Math.min(len, size.x + size.y + 256);
-  const endPt = L.point(userPt.x + (dx / len) * far, userPt.y + (dy / len) * far);
-  const endLatLng = map.containerPointToLatLng(endPt);
-  return [userPos, [endLatLng.lat, endLatLng.lng]];
+// This is the geometrically correct Qibla: its INITIAL direction equals the
+// great-circle compass bearing (so it matches the "aligned" indicator and the
+// arrow exactly), and it ends right at the Kaaba — so the line genuinely points
+// to Mecca. On a Mercator map it looks straight when zoomed in (the local curve
+// is negligible) and only curves when zoomed far out, which is correct. Longitudes
+// are unwrapped so the polyline stays continuous if the path crosses ±180°.
+function greatCirclePath(lat1: number, lon1: number, lat2: number, lon2: number, n = 128): [number, number][] {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const φ1 = toRad(lat1), λ1 = toRad(lon1), φ2 = toRad(lat2), λ2 = toRad(lon2);
+  const d = 2 * Math.asin(Math.sqrt(
+    Math.sin((φ2 - φ1) / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2,
+  ));
+  if (!isFinite(d) || d === 0) return [[lat1, lon1], [lat2, lon2]];
+
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+    const φ = Math.atan2(z, Math.sqrt(x * x + y * y));
+    const λ = Math.atan2(y, x);
+    pts.push([toDeg(φ), toDeg(λ)]);
+  }
+  // Unwrap longitudes so big seams across the antimeridian don't draw a flat jump.
+  for (let i = 1; i < pts.length; i++) {
+    const dlon = pts[i][1] - pts[i - 1][1];
+    if (dlon > 180) pts[i][1] -= 360;
+    else if (dlon < -180) pts[i][1] += 360;
+  }
+  return pts;
 }
 
 interface QiblaScreenProps {
@@ -94,7 +109,8 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     ? ((heading + declination) % 360 + 360) % 360
     : heading;
   const diff = ((qiblaAngle - trueHeading) % 360 + 360) % 360;
-  const isFacingQibla = diff < 6 || diff > 354;
+  // Tighter ±4° window so "aligned" only shows when genuinely on the Qibla line.
+  const isFacingQibla = diff < 4 || diff > 356;
 
   // Track whether we've received an absolute event so we can ignore relative ones
   const hasAbsoluteRef = useRef(false);
@@ -241,7 +257,10 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     // Initialize Map Instance
     const map = L.map(mapContainerRef.current, {
       zoomControl: false,
-      attributionControl: false
+      attributionControl: false,
+      // Canvas renderer reprojects vector layers every frame, so the Qibla line
+      // never blanks out mid pinch-zoom and isn't subject to SVG coordinate limits.
+      preferCanvas: true,
     }).setView(userPos, 15);
 
     mapInstanceRef.current = map;
@@ -325,29 +344,23 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     const userMarker = L.marker(userPos, { icon: userIcon }).addTo(map);
     userMarkerRef.current = userMarker;
 
-    // Qibla ray — aimed straight at the Kaaba marker and redrawn on every pan/zoom
-    // so it always points at Mecca and reaches the screen edge, never clipped.
-    const polyline = L.polyline(qiblaLinePoints(map, userPos, meccaPos), {
+    // Qibla geodesic — fixed geographic points from the user to the Kaaba. Leaflet
+    // reprojects them natively on pan/zoom (Canvas renderer), so no manual redraw is
+    // needed and the line can never disappear during a gesture.
+    const polyline = L.polyline(greatCirclePath(userPos[0], userPos[1], meccaPos[0], meccaPos[1]), {
       color: '#3B82F6',
       weight: 4,
       opacity: 1,
     }).addTo(map);
     polylineRef.current = polyline;
 
-    const redrawQiblaLine = () => {
-      if (polylineRef.current) {
-        polylineRef.current.setLatLngs(qiblaLinePoints(map, userPos, meccaPos));
-      }
-    };
-    map.on('move zoom zoomend moveend resize', redrawQiblaLine);
-
     // The map often mounts while the screen is still animating in (container has
     // zero size) → Leaflet renders blank tiles. Force a re-measure a few times
     // and whenever the container resizes so tiles always paint.
-    const fixSize = () => { map.invalidateSize(); redrawQiblaLine(); };
+    const fixSize = () => map.invalidateSize();
     const t1 = setTimeout(fixSize, 250);
     const t2 = setTimeout(fixSize, 650);
-    const ro = new ResizeObserver(() => { map.invalidateSize(); redrawQiblaLine(); });
+    const ro = new ResizeObserver(() => map.invalidateSize());
     ro.observe(mapContainerRef.current);
 
     setMapLoaded(true);
@@ -356,7 +369,6 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
       clearTimeout(t1);
       clearTimeout(t2);
       ro.disconnect();
-      map.off('move zoom zoomend moveend resize', redrawQiblaLine);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;

@@ -19,7 +19,7 @@ export interface ReminderSettings {
   
   // Settings
   language: 'en' | 'es' | 'ar' | 'fr' | 'de' | 'tr' | 'pt' | 'ur' | 'id' | 'ms' | 'bn' | 'fa' | 'ru';
-  wallpaper: 'arafat' | 'mosque' | 'navy_gold' | 'charcoal' | 'emerald';
+  wallpaper: 'arafat' | 'mosque' | 'navy_gold' | 'charcoal' | 'emerald' | 'midnight' | 'plum' | 'rose' | 'ocean';
   appLogo: 'default' | 'golden-crescent' | 'crescent-star' | 'mosque' | 'star8';
   locationMode: 'auto' | 'manual';
   manualLatitude: number;
