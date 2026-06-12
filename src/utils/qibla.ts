@@ -1,21 +1,27 @@
+// Qibla as the RHUMB (constant-compass) bearing to the Kaaba.
+//
+// Chosen by the user over the great-circle initial bearing: a rhumb course is a
+// perfectly straight line to the Kaaba on a Mercator map, so the map line, the
+// compass arrow and the "ALIGNED!" indicator all agree exactly — you are aligned
+// precisely when you look along the on-screen line, and holding that compass
+// heading the whole way takes you to the Kaaba.
 export function getQiblaDirection(lat1: number, lon1: number): number {
   const meccaLat = 21.422487;
   const meccaLon = 39.826206;
 
-  // Convert to radians
-  const lat1Rad = lat1 * (Math.PI / 180);
-  const lon1Rad = lon1 * (Math.PI / 180);
-  const lat2Rad = meccaLat * (Math.PI / 180);
-  const lon2Rad = meccaLon * (Math.PI / 180);
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(meccaLat);
 
-  const dLon = lon2Rad - lon1Rad;
+  // Shortest longitude difference, wrapped to (-180°, 180°]
+  const dLonDeg = ((meccaLon - lon1 + 540) % 360) - 180;
+  const Δλ = toRad(dLonDeg);
 
-  const y = Math.sin(dLon) * Math.cos(lat2Rad);
-  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
-            Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+  // Mercator latitude stretch
+  const Δψ = Math.log(
+    Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2),
+  );
 
-  let qiblaHeading = Math.atan2(y, x) * (180 / Math.PI);
-  qiblaHeading = (qiblaHeading + 360) % 360;
-
-  return qiblaHeading;
+  const θ = Math.atan2(Δλ, Δψ) * (180 / Math.PI);
+  return (θ + 360) % 360;
 }

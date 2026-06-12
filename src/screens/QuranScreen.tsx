@@ -29,10 +29,31 @@ export function QuranScreen() {
   const [surahError, setSurahError] = useState<string | null>(null);
   
   const [playingAyah, setPlayingAyah] = useState<number | null>(null);
+  // ONE persistent <audio> element reused for every ayah. It gets "unlocked" by the
+  // first user tap, after which iOS allows programmatic .play() on it forever — even
+  // after awaiting a slow network fetch (a fresh `new Audio()` per ayah gets BLOCKED
+  // by iOS when the file isn't cached yet, e.g. right after switching reciter).
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playingAyahRef = useRef<number | null>(null);
+  const playTokenRef = useRef(0);
+  const surahDataRef = useRef<SurahData[] | null>(null);
   const blobUrlsRef = useRef<string[]>([]);
   // url → object-URL cache so the next ayah is ready before the current ends (gapless).
   const prefetchRef = useRef<Map<string, string>>(new Map());
+
+  // Tiny silent WAV used to unlock the audio element inside the tap gesture.
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+
+  const ensureAudioEl = (): HTMLAudioElement => {
+    if (!audioRef.current) {
+      const el = new Audio(SILENT_WAV);
+      el.preload = 'auto';
+      // Play the silent clip during the user gesture → element is user-activated.
+      el.play().catch(() => {});
+      audioRef.current = el;
+    }
+    return audioRef.current;
+  };
   
   const [showTransliteration, setShowTransliteration] = useState(true);
   const [showTranslation, setShowTranslation] = useState(true);
@@ -51,6 +72,12 @@ export function QuranScreen() {
   useEffect(() => {
     autoplayRef.current = autoplay;
   }, [autoplay]);
+
+  // Keep a ref in sync so the autoplay chain always reads the CURRENT surah/reciter
+  // data instead of a stale closure from when playback started.
+  useEffect(() => {
+    surahDataRef.current = surahData;
+  }, [surahData]);
 
   // Track user touch/scroll interactions to pause auto-scrolling
   const handleUserActivity = () => {
@@ -138,10 +165,7 @@ export function QuranScreen() {
     setLoadingSurah(true);
     setSurahError(null);
     setSurahData(null);
-    setPlayingAyah(null);
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
+    stopPlayback();
     
     const transEdition = LANGUAGE_TRANSLATION_EDITIONS[settings.language] || 'en.sahih';
     const reciterEdition = settings.reciter || 'ar.alafasy';
@@ -236,11 +260,8 @@ export function QuranScreen() {
   };
 
   const closeSurah = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
+    stopPlayback();
     setSelectedSurah(null);
-    setPlayingAyah(null);
     setSurahError(null);
     clearBlobUrls();
   };
@@ -303,65 +324,79 @@ export function QuranScreen() {
     getBlobUrl(url).catch(() => {});
   };
 
+  const setPlaying = (n: number | null) => {
+    playingAyahRef.current = n;
+    setPlayingAyah(n);
+  };
+
+  const stopPlayback = () => {
+    playTokenRef.current++;
+    if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.pause();
+    }
+    setPlaying(null);
+  };
+
   const playAudio = async (ayahNum: number, audioUrl: string | undefined) => {
     if (!audioUrl) return;
 
-    if (playingAyah === ayahNum && audioRef.current) {
-      audioRef.current.pause();
-      setPlayingAyah(null);
+    // Tap on the ayah that's already playing → toggle off.
+    if (playingAyahRef.current === ayahNum) {
+      stopPlayback();
       return;
     }
 
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
+    const el = ensureAudioEl();
+    const token = ++playTokenRef.current;
+    el.onended = null;
+    el.pause();
 
     try {
-      setPlayingAyah(ayahNum);
+      setPlaying(ayahNum);
 
       const blobUrl = await getBlobUrl(audioUrl);
+      // Another play/stop happened while we were fetching → abandon this one.
+      if (playTokenRef.current !== token) return;
 
-      const audio = new Audio(blobUrl);
-      audio.preload = 'auto';
-      audioRef.current = audio;
+      el.src = blobUrl;
 
       // Prefetch the next ayah NOW so onended can chain to it with no gap.
-      const audioEdition = surahData?.find(d => d.edition.format === 'audio');
+      // Read from the ref so reciter/surah switches mid-play use fresh data.
+      const audioEdition = surahDataRef.current?.find(d => d.edition.format === 'audio');
       const nextAyah = audioEdition?.ayahs.find(a => a.numberInSurah === ayahNum + 1);
       prefetchAudio(nextAyah?.audio);
 
-      audio.onended = () => {
+      el.onended = () => {
         if (!autoplayRef.current) {
-          setPlayingAyah(null);
+          setPlaying(null);
           return;
         }
         if (nextAyah && nextAyah.audio) {
           playAudio(ayahNum + 1, nextAyah.audio);
         } else {
-          setPlayingAyah(null);
+          setPlaying(null);
         }
       };
 
-      audio.play().catch(err => {
-        console.error("Playback start interrupted:", err);
-        setPlayingAyah(null);
-      });
-    } catch (e) {
-      console.error("Error setting up audio:", e);
-      setPlayingAyah(null);
+      await el.play();
+    } catch (e: any) {
+      if (playTokenRef.current === token) {
+        console.error('Playback error:', e);
+        setPlaying(null);
+      }
     }
   };
 
   const handlePlaySurahToggle = () => {
     const audioEdition = surahData?.find(d => d.edition.format === 'audio');
     if (!audioEdition || audioEdition.ayahs.length === 0) return;
-    
-    if (playingAyah !== null) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      setPlayingAyah(null);
+
+    if (playingAyahRef.current !== null) {
+      stopPlayback();
     } else {
+      // Unlock the element inside this tap before any awaits.
+      ensureAudioEl();
       const firstAyah = audioEdition.ayahs[0];
       if (firstAyah && firstAyah.audio) {
         playAudio(firstAyah.numberInSurah, firstAyah.audio);
@@ -372,7 +407,9 @@ export function QuranScreen() {
   useEffect(() => {
     return () => {
       if (audioRef.current) {
+        audioRef.current.onended = null;
         audioRef.current.pause();
+        audioRef.current.src = '';
       }
       clearBlobUrls();
     };

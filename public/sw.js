@@ -1,6 +1,7 @@
 const CACHE_NAME = 'al-nour-v9';
 const API_CACHE_NAME = 'al-nour-api-v9';
 const AUDIO_CACHE_NAME = 'al-nour-audio-v4';
+const TILE_CACHE_NAME = 'al-nour-tiles-v1';
 
 const STATIC_ASSETS = [
   '/',
@@ -31,7 +32,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME && key !== API_CACHE_NAME && key !== AUDIO_CACHE_NAME)
+          .filter((key) => key !== CACHE_NAME && key !== API_CACHE_NAME && key !== AUDIO_CACHE_NAME && key !== TILE_CACHE_NAME)
           .map((key) => caches.delete(key))
       );
     })
@@ -108,9 +109,46 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  const isAudioFile = 
-    url.pathname.endsWith('.mp3') || 
-    url.origin.includes('everyayah.com') || 
+  // ── Qibla map tiles (OSM + Esri satellite): cache-first so areas the user has
+  // already viewed keep working fully offline. Tiles are refetched with CORS so
+  // they store as real (non-opaque) responses — accurate quota + verifiable status.
+  const isMapTile =
+    url.hostname.endsWith('tile.openstreetmap.org') ||
+    (url.hostname === 'server.arcgisonline.com' && url.pathname.includes('World_Imagery'));
+
+  if (isMapTile) {
+    event.respondWith(
+      caches.open(TILE_CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(event.request.url);
+        if (cached) return cached;
+        try {
+          let res;
+          try {
+            res = await fetch(event.request.url, { mode: 'cors' });
+          } catch (_) {
+            res = await fetch(event.request);
+          }
+          if (res && (res.ok || res.type === 'opaque')) {
+            cache.put(event.request.url, res.clone());
+            // Soft cap: trim oldest tiles so the cache can't grow unbounded.
+            cache.keys().then((keys) => {
+              if (keys.length > 1200) {
+                keys.slice(0, 200).forEach((k) => cache.delete(k));
+              }
+            });
+          }
+          return res;
+        } catch (e) {
+          return cached || Response.error();
+        }
+      })
+    );
+    return;
+  }
+
+  const isAudioFile =
+    url.pathname.endsWith('.mp3') ||
+    url.origin.includes('everyayah.com') ||
     url.origin.includes('cdn.aladhan.com') || 
     url.origin.includes('verses.quran.com') || 
     url.origin.includes('audio.qurancdn.com');

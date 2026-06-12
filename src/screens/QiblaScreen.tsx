@@ -11,40 +11,22 @@ import 'leaflet/dist/leaflet.css';
 
 const PERMISSION_KEY = 'compassPermissionGranted';
 
-// Great-circle (geodesic) path from the user to the Kaaba.
+// Straight Mercator segment from the user to the Kaaba.
 //
-// This is the geometrically correct Qibla: its INITIAL direction equals the
-// great-circle compass bearing (so it matches the "aligned" indicator and the
-// arrow exactly), and it ends right at the Kaaba — so the line genuinely points
-// to Mecca. On a Mercator map it looks straight when zoomed in (the local curve
-// is negligible) and only curves when zoomed far out, which is correct. Longitudes
-// are unwrapped so the polyline stays continuous if the path crosses ±180°.
-function greatCirclePath(lat1: number, lon1: number, lat2: number, lon2: number, n = 128): [number, number][] {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const toDeg = (r: number) => (r * 180) / Math.PI;
-  const φ1 = toRad(lat1), λ1 = toRad(lon1), φ2 = toRad(lat2), λ2 = toRad(lon2);
-  const d = 2 * Math.asin(Math.sqrt(
-    Math.sin((φ2 - φ1) / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2,
-  ));
-  if (!isFinite(d) || d === 0) return [[lat1, lon1], [lat2, lon2]];
-
+// Points are interpolated in PROJECTED (Web Mercator) space, so the polyline is
+// perfectly straight on screen at every zoom level and ends exactly on the Kaaba.
+// This is the on-map twin of the rhumb bearing used by the compass: looking along
+// this line IS the "aligned" direction. Sampling 64 sub-segments keeps projected
+// pixel coordinates small at high zoom, avoiding canvas precision/clipping issues.
+function mercatorStraightPath(a: [number, number], b: [number, number], n = 64): [number, number][] {
+  const proj = L.Projection.SphericalMercator;
+  const pa = proj.project(L.latLng(a[0], a[1]));
+  const pb = proj.project(L.latLng(b[0], b[1]));
   const pts: [number, number][] = [];
   for (let i = 0; i <= n; i++) {
     const f = i / n;
-    const A = Math.sin((1 - f) * d) / Math.sin(d);
-    const B = Math.sin(f * d) / Math.sin(d);
-    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
-    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
-    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
-    const φ = Math.atan2(z, Math.sqrt(x * x + y * y));
-    const λ = Math.atan2(y, x);
-    pts.push([toDeg(φ), toDeg(λ)]);
-  }
-  // Unwrap longitudes so big seams across the antimeridian don't draw a flat jump.
-  for (let i = 1; i < pts.length; i++) {
-    const dlon = pts[i][1] - pts[i - 1][1];
-    if (dlon > 180) pts[i][1] -= 360;
-    else if (dlon < -180) pts[i][1] += 360;
+    const ll = proj.unproject(L.point(pa.x + (pb.x - pa.x) * f, pa.y + (pb.y - pa.y) * f));
+    pts.push([ll.lat, ll.lng]);
   }
   return pts;
 }
@@ -344,10 +326,10 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     const userMarker = L.marker(userPos, { icon: userIcon }).addTo(map);
     userMarkerRef.current = userMarker;
 
-    // Qibla geodesic — fixed geographic points from the user to the Kaaba. Leaflet
-    // reprojects them natively on pan/zoom (Canvas renderer), so no manual redraw is
-    // needed and the line can never disappear during a gesture.
-    const polyline = L.polyline(greatCirclePath(userPos[0], userPos[1], meccaPos[0], meccaPos[1]), {
+    // Qibla line — straight on the Mercator map from the user to the Kaaba, matching
+    // the rhumb compass bearing exactly. Fixed geographic points that Leaflet
+    // reprojects natively on pan/zoom, so it never disappears during a gesture.
+    const polyline = L.polyline(mercatorStraightPath(userPos, meccaPos), {
       color: '#3B82F6',
       weight: 4,
       opacity: 1,
