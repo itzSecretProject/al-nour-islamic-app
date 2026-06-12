@@ -1,5 +1,5 @@
-const CACHE_NAME = 'al-nour-v8';
-const API_CACHE_NAME = 'al-nour-api-v8';
+const CACHE_NAME = 'al-nour-v9';
+const API_CACHE_NAME = 'al-nour-api-v9';
 const AUDIO_CACHE_NAME = 'al-nour-audio-v4';
 
 const STATIC_ASSETS = [
@@ -311,14 +311,26 @@ self.addEventListener('push', (event) => {
   const isPrayer = data.prayer && !isPreAlert && data.prayer !== 'reminder';
   const labels = ACTION_LABELS[data.lang] || ACTION_LABELS.en;
 
+  // Staleness guard: if this push was queued while the device was offline and is
+  // only arriving now (more than 20 min after its prayer time), it's no longer
+  // useful — show it quietly (no buzz / no sticky / no adhan) so a reconnect never
+  // dumps a burst of loud, late prayer alerts on the user. TTL on the server drops
+  // most of these already; this is the belt-and-suspenders for clock skew.
+  const isStale = typeof data.ts === 'number' && (Date.now() - data.ts > 20 * 60 * 1000);
+
   const opts = {
     body: data.body,
     icon: '/icon-192.png',
     badge: '/icon-192.png',
-    vibrate: isPreAlert ? [100, 50, 100] : [200, 100, 200],
+    // A stable per-prayer `tag` means a second push for the SAME prayer (e.g. a
+    // duplicate from a re-subscribed endpoint, or the in-app reminder firing too)
+    // REPLACES the first rather than stacking — the device shows one notification.
+    // `renotify: false` so that replacement doesn't re-buzz the user.
     tag: `prayer-${data.prayer || 'reminder'}`,
-    renotify: true,
-    requireInteraction: isPrayer,
+    renotify: false,
+    silent: isStale,
+    vibrate: isStale ? undefined : (isPreAlert ? [100, 50, 100] : [200, 100, 200]),
+    requireInteraction: isPrayer && !isStale,
     data: { prayer: data.prayer || null, lang: data.lang || 'en' },
     actions: isPrayer
       ? [
@@ -333,7 +345,8 @@ self.addEventListener('push', (event) => {
     // If a client (tab / installed PWA window) is alive, ask it to play the
     // user's chosen adhan. Browsers can't play custom long audio from a closed
     // SW, so this covers the open / background-tab case (e.g. desktop).
-    if (isPrayer) {
+    // Skip for stale (late) deliveries so a reconnect doesn't blast old adhans.
+    if (isPrayer && !isStale) {
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of clients) {
         client.postMessage({ type: 'PLAY_ADHAN', prayer: data.prayer, lang: data.lang || 'en' });

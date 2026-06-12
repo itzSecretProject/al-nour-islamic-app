@@ -11,22 +11,25 @@ import 'leaflet/dist/leaflet.css';
 
 const PERMISSION_KEY = 'compassPermissionGranted';
 
-// Compute the Qibla line as a 2-point segment from the user to just beyond the
-// current viewport edge, in the exact bearing direction.
+// Compute the Qibla line as a straight segment from the user, aimed exactly at
+// the Kaaba's position on the map, extended to (or stopping at) the Kaaba.
 //
-// Key insight: on Web Mercator (Leaflet's projection) a constant-bearing rhumb
-// line is a perfectly STRAIGHT line, and because the projection is conformal and
-// meridians are vertical, that straight line sits at exactly `bearing°` clockwise
-// from screen-up. So we can place the far endpoint in pixel space at the bearing
-// angle and unproject it — no great-circle curve, and because the endpoint is
-// only just off-screen it is never clipped by Leaflet's SVG buffer at any zoom.
-function qiblaLinePoints(map: L.Map, userPos: [number, number], bearingDeg: number): [number, number][] {
-  const θ = bearingDeg * Math.PI / 180;
+// We aim at the Kaaba's PROJECTED pixel position rather than at a compass bearing
+// angle: on a flat Mercator map a line drawn at the great-circle bearing angle does
+// NOT visually reach Mecca (the projection distorts direction with distance). By
+// pointing at the Kaaba's actual screen position the line always visibly points at
+// — and passes through — the Kaaba marker. The endpoint is clamped to the viewport
+// edge so the SVG buffer never clips it, but never overshoots past the Kaaba.
+function qiblaLinePoints(map: L.Map, userPos: [number, number], meccaPos: [number, number]): [number, number][] {
   const userPt = map.latLngToContainerPoint(userPos);
+  const meccaPt = map.latLngToContainerPoint(meccaPos);
+  const dx = meccaPt.x - userPt.x;
+  const dy = meccaPt.y - userPt.y;
+  const len = Math.hypot(dx, dy) || 1;
   const size = map.getSize();
-  // Far enough to always exit the viewport (full diagonal + margin).
-  const far = size.x + size.y + 256;
-  const endPt = userPt.add(L.point(Math.sin(θ), -Math.cos(θ)).multiplyBy(far));
+  // Far enough to always exit the viewport, but never beyond the Kaaba itself.
+  const far = Math.min(len, size.x + size.y + 256);
+  const endPt = L.point(userPt.x + (dx / len) * far, userPt.y + (dy / len) * far);
   const endLatLng = map.containerPointToLatLng(endPt);
   return [userPos, [endLatLng.lat, endLatLng.lng]];
 }
@@ -322,10 +325,9 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     const userMarker = L.marker(userPos, { icon: userIcon }).addTo(map);
     userMarkerRef.current = userMarker;
 
-    // Qibla ray — drawn to the viewport edge and redrawn on every pan/zoom so it
-    // always reaches the screen edge in the exact bearing, never clipped.
-    const qibla = getQiblaDirection(latitude!, longitude!);
-    const polyline = L.polyline(qiblaLinePoints(map, userPos, qibla), {
+    // Qibla ray — aimed straight at the Kaaba marker and redrawn on every pan/zoom
+    // so it always points at Mecca and reaches the screen edge, never clipped.
+    const polyline = L.polyline(qiblaLinePoints(map, userPos, meccaPos), {
       color: '#3B82F6',
       weight: 4,
       opacity: 1,
@@ -334,7 +336,7 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
 
     const redrawQiblaLine = () => {
       if (polylineRef.current) {
-        polylineRef.current.setLatLngs(qiblaLinePoints(map, userPos, qibla));
+        polylineRef.current.setLatLngs(qiblaLinePoints(map, userPos, meccaPos));
       }
     };
     map.on('move zoom zoomend moveend resize', redrawQiblaLine);

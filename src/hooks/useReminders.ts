@@ -128,8 +128,11 @@ export const useReminders = () => {
                 icon: '/icon-192.png',
                 badge: '/icon-192.png',
                 vibrate: [100, 50, 100],
-                tag: `prayer-pre-${prayer}`,
-                renotify: true,
+                // Same tag the server push uses (`prayer-<name>_pre`) so an in-app
+                // reminder and a background push for the same pre-alert collapse to
+                // ONE notification instead of duplicating when the app is open.
+                tag: `prayer-${prayer}_pre`,
+                renotify: false,
                 data: { prayer: `${prayer}_pre`, lang },
                 actions: [],
               } as NotificationOptions);
@@ -155,7 +158,7 @@ export const useReminders = () => {
               badge: '/icon-192.png',
               vibrate: [200, 100, 200],
               tag: `prayer-${prayer}`,
-              renotify: true,
+              renotify: false,
               requireInteraction: true,
               data: { prayer, lang },
               actions: settings.showPrayerTracker
@@ -193,7 +196,7 @@ export const useReminders = () => {
                 badge: '/icon-192.png',
                 vibrate: [200, 100, 200, 100, 200],
                 tag: 'prayer-jumuah',
-                renotify: true,
+                renotify: false,
                 data: { prayer: 'jumuah', lang },
                 actions: [],
               } as NotificationOptions);

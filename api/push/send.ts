@@ -412,9 +412,18 @@ export default async function handler(req: any, res: any) {
       if (!claimed) continue;
       try {
         const isPreAlert = entry.prayer.endsWith('_pre') || entry.prayer === 'jumuah';
+        // `topic` (URL-safe, ≤32 chars) tells the push service to REPLACE any earlier
+        // still-undelivered push for the same prayer instead of queuing both — so an
+        // offline device that reconnects gets at most one push per prayer.
+        const topic = `pr-${entry.prayer}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
         await webpush.sendNotification(
           record.subscription,
-          JSON.stringify({ title: entry.title, body: entry.body, prayer: entry.prayer, lang: record.language || 'en', isPreAlert }),
+          JSON.stringify({ title: entry.title, body: entry.body, prayer: entry.prayer, lang: record.language || 'en', isPreAlert, ts: entry.ts }),
+          // TTL caps how long the push service queues this if the device is offline.
+          // A prayer reminder that can't be delivered within ~20 min is pointless, so
+          // we let it EXPIRE instead of being dumped on the user hours later when they
+          // reconnect (the main source of stale/duplicate-feeling notifications).
+          { TTL: 1200, urgency: 'high', topic },
         );
         sent++;
         fired.add(entry.ts);
