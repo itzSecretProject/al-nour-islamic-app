@@ -1,20 +1,31 @@
 name: Prayer push trigger
 
-# Pings the push sender so background prayer notifications go out.
+# Pings the push sender so background prayer notifications go out ON TIME.
 # Vercel Hobby crons only run once/day, so we trigger from GitHub Actions.
-# The sender uses a 12-minute grace window + per-device dedup, so a 5-minute
-# schedule reliably delivers each prayer exactly once (GitHub's cron can drift a
-# few minutes under load — the grace window absorbs that).
+#
+# GitHub's cron granularity is 5 minutes, which alone would delay prayers by
+# up to ~5 min. So each run LOOPS, pinging every 30s for its whole window —
+# back-to-back runs give continuous ~30-second delivery precision. The repo is
+# public, so Actions minutes are free; the sender dedups, so overlap is harmless.
 
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
 
+concurrency:
+  group: prayer-push
+  cancel-in-progress: false
+
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
     steps:
-      - name: Trigger /api/push/send
+      - name: Ping /api/push/send every 30s for ~5 min
         run: |
-          curl -fsS "https://al-nour-islamic-app.vercel.app/api/push/send" || true
+          end=$((SECONDS + 285))
+          while [ $SECONDS -lt $end ]; do
+            curl -fsS --max-time 10 "https://al-nour-islamic-app.vercel.app/api/push/send" || true
+            sleep 30
+          done

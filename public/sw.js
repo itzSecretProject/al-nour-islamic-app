@@ -117,19 +117,25 @@ self.addEventListener('fetch', (event) => {
     (url.hostname === 'server.arcgisonline.com' && url.pathname.includes('World_Imagery'));
 
   if (isMapTile) {
+    // Normalize OSM's rotating subdomains (a/b/c.tile...) to one cache key, so a
+    // tile cached from any subdomain is found offline no matter which one Leaflet
+    // happens to request next time.
+    const tileKey = url.hostname.endsWith('tile.openstreetmap.org')
+      ? event.request.url.replace(/:\/\/[abc]\./, '://a.')
+      : event.request.url;
     event.respondWith(
       caches.open(TILE_CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(event.request.url);
+        const cached = await cache.match(tileKey);
         if (cached) return cached;
         try {
           let res;
           try {
-            res = await fetch(event.request.url, { mode: 'cors' });
+            res = await fetch(tileKey, { mode: 'cors' });
           } catch (_) {
             res = await fetch(event.request);
           }
           if (res && (res.ok || res.type === 'opaque')) {
-            cache.put(event.request.url, res.clone());
+            cache.put(tileKey, res.clone());
             // Soft cap: trim oldest tiles so the cache can't grow unbounded.
             cache.keys().then((keys) => {
               if (keys.length > 1200) {

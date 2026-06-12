@@ -31,6 +31,46 @@ function mercatorStraightPath(a: [number, number], b: [number, number], n = 64):
   return pts;
 }
 
+// Pre-cache a small pyramid of map tiles around the user (and the Kaaba) so the
+// Qibla map keeps working offline even in areas never browsed online. The service
+// worker intercepts these fetches and stores them cache-first in the tile cache.
+function prefetchOfflineTiles(lat: number, lon: number, mode: 'road' | 'satellite') {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  const tileXY = (la: number, lo: number, z: number): [number, number] => {
+    const n = 2 ** z;
+    const x = Math.floor(((lo + 180) / 360) * n);
+    const laR = (la * Math.PI) / 180;
+    const y = Math.floor(((1 - Math.log(Math.tan(laR) + 1 / Math.cos(laR)) / Math.PI) / 2) * n);
+    return [Math.min(n - 1, Math.max(0, x)), Math.min(n - 1, Math.max(0, y))];
+  };
+  const urlFor = (z: number, x: number, y: number) =>
+    mode === 'satellite'
+      ? `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
+      : `https://a.tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  const urls: string[] = [];
+  const add = (la: number, lo: number, zooms: number[]) => {
+    for (const z of zooms) {
+      const [cx, cy] = tileXY(la, lo, z);
+      const n = 2 ** z;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const x = (((cx + dx) % n) + n) % n;
+          const y = Math.min(n - 1, Math.max(0, cy + dy));
+          urls.push(urlFor(z, x, y));
+        }
+      }
+    }
+  };
+  add(lat, lon, [4, 6, 9, 12, 15]); // around the user (overview → street level)
+  add(21.422487, 39.826206, [4, 6, 9]); // around the Kaaba
+  // Throttled fire-and-forget; the SW caches every response it sees.
+  (async () => {
+    for (const u of urls) {
+      try { await fetch(u, { mode: 'no-cors' }); } catch { /* offline mid-loop: stop quietly */ }
+    }
+  })();
+}
+
 interface QiblaScreenProps {
   onBack?: () => void;
 }
@@ -371,6 +411,13 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
     const newTiles = L.tileLayer(tileUrl, { maxZoom: 19 }).addTo(mapInstanceRef.current);
     tileLayerRef.current = newTiles;
   }, [mapMode]);
+
+  // Warm the offline tile cache for the active style around the user + Kaaba.
+  useEffect(() => {
+    if (latitude == null || longitude == null || loading) return;
+    const id = setTimeout(() => prefetchOfflineTiles(latitude, longitude, mapMode), 1500);
+    return () => clearTimeout(id);
+  }, [latitude, longitude, loading, mapMode]);
 
   // Update user pointer rotation in real-time without recreating Leaflet instances
   useEffect(() => {
