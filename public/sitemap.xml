@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://al-nour-islamic-app.vercel.app/</loc>
+    <lastmod>2026-06-08</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="ur" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="id" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="ms" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="bn" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://al-nour-islamic-app.vercel.app/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://al-nour-islamic-app.vercel.app/"/>
+  </url>
+</urlset>

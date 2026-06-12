@@ -1,0 +1,10 @@
+{
+  "name": "Al-Nour Islamic App",
+  "description": "Full-featured Islamic application with prayer times, Qibla direction, Tasbih, and daily guidance, designed with a mobile-first interface.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
