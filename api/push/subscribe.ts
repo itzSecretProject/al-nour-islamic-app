@@ -61,19 +61,22 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const { subscription, schedule, language, showRakats, userId } = req.body || {};
+  const {
+    subscription, schedule, language, showRakats, userId,
+    lat, lng, method, offsets, preAlertMinutes,
+    silentHoursEnabled, silentHoursStart, silentHoursEnd, jumuahReminder,
+  } = req.body || {};
+
   if (!subscription?.endpoint || !Array.isArray(schedule)) {
     res.status(400).json({ error: 'subscription and schedule required' });
     return;
   }
 
-  // Keep the stored schedule small (Edge Config size limits): next ~16 days only.
-  const horizon = Date.now() + 16 * 24 * 60 * 60 * 1000;
+  // Store 30 days so the server has plenty of runway before auto-rebuild kicks in.
+  const horizon = Date.now() + 30 * 24 * 60 * 60 * 1000;
   const trimmed = schedule.filter((e: any) => e && e.ts <= horizon);
 
   const hash = await digestHash(subscription.endpoint);
-  // Preserve fired[] from the existing record so re-subscribing (e.g. opening
-  // the app) doesn't wipe the dedup state mid-grace-window.
   const existing = await ecReadItem(`sub_${hash}`);
   const record = {
     subscription,
@@ -81,6 +84,16 @@ export default async function handler(req: any, res: any) {
     language: language || 'es',
     showRakats: showRakats !== false,
     updatedAt: Date.now(),
+    // Coordinates + settings let the server rebuild the schedule without the app being open.
+    ...(lat != null ? { lat } : existing?.lat != null ? { lat: existing.lat } : {}),
+    ...(lng != null ? { lng } : existing?.lng != null ? { lng: existing.lng } : {}),
+    ...(method != null ? { method } : existing?.method != null ? { method: existing.method } : {}),
+    ...(offsets != null ? { offsets } : existing?.offsets != null ? { offsets: existing.offsets } : {}),
+    ...(preAlertMinutes != null ? { preAlertMinutes } : existing?.preAlertMinutes != null ? { preAlertMinutes: existing.preAlertMinutes } : {}),
+    ...(silentHoursEnabled != null ? { silentHoursEnabled } : existing?.silentHoursEnabled != null ? { silentHoursEnabled: existing.silentHoursEnabled } : {}),
+    ...(silentHoursStart != null ? { silentHoursStart } : existing?.silentHoursStart != null ? { silentHoursStart: existing.silentHoursStart } : {}),
+    ...(silentHoursEnd != null ? { silentHoursEnd } : existing?.silentHoursEnd != null ? { silentHoursEnd: existing.silentHoursEnd } : {}),
+    ...(jumuahReminder != null ? { jumuahReminder } : existing?.jumuahReminder != null ? { jumuahReminder: existing.jumuahReminder } : {}),
     ...(userId ? { userId } : {}),
     ...(Array.isArray(existing?.fired) ? { fired: existing.fired } : {}),
   };

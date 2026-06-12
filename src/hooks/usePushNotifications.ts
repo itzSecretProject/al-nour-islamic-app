@@ -333,6 +333,16 @@ export function usePushNotifications() {
             language: lang,
             showRakats: settings.showRakats,
             userId: user?.id,
+            // Server needs these to auto-rebuild the schedule when it expires.
+            lat,
+            lng,
+            method,
+            offsets: settings.offsets ?? {},
+            preAlertMinutes: settings.preAlertMinutes ?? 0,
+            silentHoursEnabled: settings.silentHoursEnabled ?? false,
+            silentHoursStart: settings.silentHoursStart ?? 23,
+            silentHoursEnd: settings.silentHoursEnd ?? 5,
+            jumuahReminder: settings.jumuahReminder ?? true,
           }),
         });
 
