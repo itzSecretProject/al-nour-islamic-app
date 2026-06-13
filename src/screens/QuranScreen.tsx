@@ -14,6 +14,17 @@ interface VerseOfDay {
   reference: string;
 }
 
+const RECITER_NAMES: Record<string, string> = {
+  'ar.alafasy': 'Mishary Alafasy',
+  'ar.yasseraddussari': 'Yasser Al-Dossari',
+  'ar.saadghamidi': 'Saad Al-Ghamdi',
+  'ar.abdurrahmaansudais': 'Abdurrahman As-Sudais',
+  'ar.mahermuaiqly': 'Maher Al-Muaiqly',
+  'ar.husary': 'Mahmoud Al-Husary',
+  'ar.ahmedajamy': 'Ahmed Al-Ajmy',
+  'ar.shaatree': 'Abu Bakr Al-Shatri',
+};
+
 export function QuranScreen() {
   const { settings } = useSettings();
   const lang = settings.language || 'es';
@@ -51,8 +62,51 @@ export function QuranScreen() {
       // Play the silent clip during the user gesture → element is user-activated.
       el.play().catch(() => {});
       audioRef.current = el;
+      wireMediaSession(el);
     }
     return audioRef.current;
+  };
+
+  // Lock-screen / notification controls (play, pause, next/prev ayah) via the
+  // Media Session API — lets recitation continue in the background with OS controls.
+  const wireMediaSession = (el: HTMLAudioElement) => {
+    const ms = (navigator as any).mediaSession;
+    if (!ms) return;
+    try {
+      ms.setActionHandler('play', () => { el.play().catch(() => {}); });
+      ms.setActionHandler('pause', () => { el.pause(); });
+      ms.setActionHandler('nexttrack', () => {
+        const cur = playingAyahRef.current;
+        const ed = surahDataRef.current?.find(d => d.edition.format === 'audio');
+        const nx = cur != null ? ed?.ayahs.find(a => a.numberInSurah === cur + 1) : undefined;
+        if (nx?.audio) playAudio(nx.numberInSurah, nx.audio);
+      });
+      ms.setActionHandler('previoustrack', () => {
+        const cur = playingAyahRef.current;
+        const ed = surahDataRef.current?.find(d => d.edition.format === 'audio');
+        const pv = cur != null ? ed?.ayahs.find(a => a.numberInSurah === cur - 1) : undefined;
+        if (pv?.audio) playAudio(pv.numberInSurah, pv.audio);
+      });
+    } catch {}
+  };
+
+  const updateMediaSessionMeta = (ayahNum: number) => {
+    const ms = (navigator as any).mediaSession;
+    if (!ms || typeof (window as any).MediaMetadata === 'undefined') return;
+    const meta = surahs.find(s => s.number === selectedSurah);
+    const reciterName = RECITER_NAMES[settings.reciter || 'ar.alafasy'] || 'Al Nour';
+    try {
+      ms.metadata = new (window as any).MediaMetadata({
+        title: `${meta?.englishName || 'Surah'} · ${lang === 'ar' ? 'آية' : 'Ayah'} ${ayahNum}`,
+        artist: reciterName,
+        album: meta?.name || 'Al Nour',
+        artwork: [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+        ],
+      });
+      ms.playbackState = 'playing';
+    } catch {}
   };
   
   const [showTransliteration, setShowTransliteration] = useState(true);
@@ -335,6 +389,8 @@ export function QuranScreen() {
       audioRef.current.onended = null;
       audioRef.current.pause();
     }
+    const ms = (navigator as any).mediaSession;
+    if (ms) { try { ms.playbackState = 'paused'; } catch {} }
     setPlaying(null);
   };
 
@@ -380,6 +436,7 @@ export function QuranScreen() {
       };
 
       await el.play();
+      updateMediaSessionMeta(ayahNum);
     } catch (e: any) {
       if (playTokenRef.current === token) {
         console.error('Playback error:', e);

@@ -19,7 +19,9 @@ import { useSalahTracker, OBLIGATORY_PRAYERS } from '../context/SalahTrackerCont
 // out of the initial Home bundle.
 const LearnPrayerScreen = lazy(() => import('./LearnPrayerScreen').then(m => ({ default: m.LearnPrayerScreen })));
 const CommunityScreen = lazy(() => import('./CommunityScreen').then(m => ({ default: m.CommunityScreen })));
+const KhatmahScreen = lazy(() => import('./KhatmahScreen').then(m => ({ default: m.KhatmahScreen })));
 import { isAccountable } from '../context/SettingsContext';
+import { BookMarked } from 'lucide-react';
 
 const ARABIC_PRAYER_NAMES: Record<string, string> = {
   Imsak: 'الإمساك',
@@ -186,6 +188,7 @@ export function HomeScreen() {
   const [showHajjUmrah, setShowHajjUmrah] = useState(false);
   const [showTracker, setShowTracker] = useState(false);
   const [showMemorize, setShowMemorize] = useState(false);
+  const [showKhatmah, setShowKhatmah] = useState(false);
   const [showAdhkar, setShowAdhkar] = useState(false);
   const [showMonthly, setShowMonthly] = useState(false);
   const [showLearn, setShowLearn] = useState(false);
@@ -349,6 +352,33 @@ export function HomeScreen() {
   })();
 
   const islamicDayInfo = prayerData ? getIslamicDayInfo(hijriDay, hijriMonthNum) : { today: null, upcoming: null };
+
+  // Live countdown to the next prayer in the tab/PWA title — a lightweight
+  // "always-visible" widget without needing native OS widgets.
+  useEffect(() => {
+    if (!nextPrayer) return;
+    const name = PRAYER_NAMES[lang]?.[nextPrayer.name] || nextPrayer.name;
+    document.title = `${formatCountdown(Math.max(0, countdownSeconds))} · ${name} — Al Nour`;
+    return () => { document.title = 'Al Nour'; };
+  }, [nextPrayer?.name, countdownSeconds, lang]);
+
+  // ── Ramadan iftar / suhoor countdown (only during Ramadan, month 9) ──
+  const ramadanCountdown = (() => {
+    if (!prayerData || hijriMonthNum !== 9) return null;
+    const fajrM = parseMinutes(cleanTime(prayerData.timings.Fajr));
+    const maghribM = parseMinutes(cleanTime(prayerData.timings.Maghrib));
+    const secsTo = (targetMin: number) => {
+      let diff = (targetMin - nowMinutes) * 60 - now.getSeconds();
+      if (diff < 0) diff += 24 * 3600;
+      return diff;
+    };
+    if (nowMinutes >= fajrM && nowMinutes < maghribM) {
+      // Fasting → countdown to iftar (Maghrib)
+      return { mode: 'iftar' as const, seconds: secsTo(maghribM) };
+    }
+    // Not fasting hours → countdown to suhoor end (Fajr)
+    return { mode: 'suhoor' as const, seconds: secsTo(fajrM) };
+  })();
 
   // Dua of the Day — rotates by calendar day, recomputes once per day
   const todayDateStr = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
@@ -580,6 +610,36 @@ export function HomeScreen() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Ramadan iftar/suhoor countdown — only during Ramadan */}
+                {ramadanCountdown && (
+                  <div className={`rounded-3xl p-5 shadow-2xl relative overflow-hidden border ${
+                    ramadanCountdown.mode === 'iftar'
+                      ? 'bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-transparent border-amber-500/30'
+                      : 'bg-gradient-to-br from-indigo-500/15 via-violet-500/10 to-transparent border-indigo-400/30'}`}>
+                    <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full blur-2xl pointer-events-none bg-[#FCD34D]/15" />
+                    <div className="flex items-center justify-between relative">
+                      <div className="flex items-center gap-3">
+                        <span className="text-3xl">{ramadanCountdown.mode === 'iftar' ? '🌅' : '🌙'}</span>
+                        <div>
+                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#FCD34D]">
+                            {ramadanCountdown.mode === 'iftar'
+                              ? (lang === 'es' ? 'Ramadán · Iftar en' : lang === 'ar' ? 'رمضان · الإفطار بعد' : 'Ramadan · Iftar in')
+                              : (lang === 'es' ? 'Ramadán · Suhoor termina en' : lang === 'ar' ? 'رمضان · ينتهي السحور بعد' : 'Ramadan · Suhoor ends in')}
+                          </p>
+                          <p className="text-[10px] text-[#A7F3D0]/60 mt-0.5">
+                            {ramadanCountdown.mode === 'iftar'
+                              ? (lang === 'es' ? 'Que tu ayuno sea aceptado' : lang === 'ar' ? 'تقبل الله صيامك' : 'May your fast be accepted')
+                              : (lang === 'es' ? 'No olvides la intención' : lang === 'ar' ? 'لا تنسَ النية' : "Don't forget the intention")}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-2xl font-mono font-black text-white tabular-nums">
+                        {formatCountdown(Math.max(0, ramadanCountdown.seconds))}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Next prayer Hero Glassmorphic card */}
                 <div className="bg-white/[0.04] backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
@@ -952,6 +1012,33 @@ export function HomeScreen() {
                     </p>
                   </div>
                 </motion.div>
+
+                {/* Khatmah Plan Bento Card */}
+                <motion.div
+                  whileHover={{ y: -4, scale: 1.01 }}
+                  onClick={() => setShowKhatmah(true)}
+                  className="bg-white/[0.02] hover:bg-white/[0.05] border border-white/10 p-5 rounded-[2rem] cursor-pointer hover:border-emerald-500/40 transition-all flex flex-col justify-between min-h-[140px] shadow-md relative overflow-hidden group"
+                >
+                  <div className="absolute -right-3 -top-3 w-16 h-16 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition-all" />
+                  <div className="flex justify-between items-start">
+                    <div className="p-3 bg-white/5 border border-white/10 rounded-2xl text-[#FCD34D] group-hover:bg-amber-500/10 group-hover:border-amber-500/30 transition-all">
+                      <BookMarked size={20} />
+                    </div>
+                    {settings.khatmahActive && (
+                      <span className="text-[9px] font-bold text-[#FCD34D] tabular-nums bg-[#FCD34D]/10 border border-[#FCD34D]/25 px-2 py-0.5 rounded-full">
+                        {Math.round(((settings.khatmahPagesRead || 0) / 604) * 100)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-4 text-left">
+                    <h4 className="font-bold text-white text-sm leading-snug">
+                      {lang === 'es' ? 'Plan de Khatmah' : lang === 'ar' ? 'خطة الختمة' : 'Khatmah Plan'}
+                    </h4>
+                    <p className="text-[9px] text-[#A7F3D0]/50 mt-1 uppercase tracking-wider font-semibold">
+                      {lang === 'es' ? 'Termina el Corán' : lang === 'ar' ? 'أكمل القرآن' : 'Finish the Quran'}
+                    </p>
+                  </div>
+                </motion.div>
               </div>
 
               {/* Learn to Pray CTA (Salah · Wudu · Ghusl) — hideable once you know how */}
@@ -1039,6 +1126,11 @@ export function HomeScreen() {
         )}
         {showMemorize && (
           <MemorizeScreen onClose={() => setShowMemorize(false)} />
+        )}
+        {showKhatmah && (
+          <Suspense fallback={null}>
+            <KhatmahScreen onClose={() => setShowKhatmah(false)} />
+          </Suspense>
         )}
         {showMonthly && (
           <MonthlyTimetableScreen onClose={() => setShowMonthly(false)} />

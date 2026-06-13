@@ -55,6 +55,19 @@ export interface ReminderSettings {
   silentHoursStart: number; // 0–23 (hour, default 23)
   silentHoursEnd: number; // 0–23 (hour, default 5)
   islamicDateAlerts: boolean; // notify on important hijri dates (Ramadan, Eid, etc.)
+  // Adhkar (morning/evening remembrance) reminders — configurable, push-backed.
+  adhkarMorningReminder: boolean; // notify for morning adhkar (after Fajr)
+  adhkarEveningReminder: boolean; // notify for evening adhkar (after Asr)
+  adhkarMorningOffset: number;    // minutes after Fajr (default 30)
+  adhkarEveningOffset: number;    // minutes after Asr (default 30)
+  // Khatmah — Quran completion plan
+  khatmahActive: boolean;         // a completion plan is running
+  khatmahTotalDays: number;       // target days to finish (e.g. 30)
+  khatmahStartDate: string;       // YYYY-MM-DD the plan started
+  khatmahStartPage: number;       // mushaf page at start (usually 1)
+  khatmahPagesRead: number;       // pages read so far
+  khatmahReminder: boolean;       // daily push reminder for the day's pages
+  khatmahReminderHour: number;    // 0–23 hour for the daily reminder
 }
 
 // Maturity model based on age. Under 15 (Islamic age of accountability / baligh)
@@ -132,6 +145,17 @@ export const DEFAULT_SETTINGS: ReminderSettings = {
   silentHoursStart: 23,
   silentHoursEnd: 5,
   islamicDateAlerts: true,
+  adhkarMorningReminder: false,
+  adhkarEveningReminder: false,
+  adhkarMorningOffset: 30,
+  adhkarEveningOffset: 30,
+  khatmahActive: false,
+  khatmahTotalDays: 30,
+  khatmahStartDate: '',
+  khatmahStartPage: 1,
+  khatmahPagesRead: 0,
+  khatmahReminder: true,
+  khatmahReminderHour: 9,
 };
 
 interface SettingsContextType {

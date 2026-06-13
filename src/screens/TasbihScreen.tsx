@@ -185,10 +185,15 @@ export function TasbihScreen() {
     setCount(prev => {
       const newVal = prev + 1;
       setSessionTotal(s => s + 1);
-      
+
       // If we reach target, auto save to history
       if (newVal === activeZikr.target) {
         saveCurrentProgressToHistory(activeZikr.target);
+        // Distinct completion buzz so you feel the cycle end without looking.
+        if (settings.tasbihHaptics && navigator.vibrate) navigator.vibrate([60, 70, 60, 70, 140]);
+      } else if (newVal % 33 === 0 && settings.tasbihHaptics && navigator.vibrate) {
+        // Milestone tick every 33 (subhanallah / alhamdulillah / allahu-akbar boundaries).
+        navigator.vibrate([40, 50, 40]);
       }
       return newVal;
     });

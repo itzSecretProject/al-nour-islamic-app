@@ -351,7 +351,7 @@ self.addEventListener('push', (event) => {
 
   // A "core" prayer is one the user can log (Fajr/Dhuhr/Asr/Maghrib/Isha).
   // Pre-alerts (_pre), jumuah reminders, and events don't get prayed/missed buttons.
-  const isPreAlert = data.isPreAlert || (data.prayer && (data.prayer.endsWith('_pre') || data.prayer === 'jumuah' || data.prayer === 'event'));
+  const isPreAlert = data.isPreAlert || (data.prayer && (data.prayer.endsWith('_pre') || data.prayer === 'jumuah' || data.prayer === 'event' || data.prayer === 'adhkar_morning' || data.prayer === 'adhkar_evening' || data.prayer === 'khatmah'));
   const isPrayer = data.prayer && !isPreAlert && data.prayer !== 'reminder';
   const labels = ACTION_LABELS[data.lang] || ACTION_LABELS.en;
 

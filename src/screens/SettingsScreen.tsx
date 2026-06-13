@@ -964,6 +964,44 @@ export function SettingsScreen() {
               </button>
             </div>
 
+            {/* Morning Adhkar Reminder */}
+            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+              <div>
+                <span className="font-bold text-white text-xs block">
+                  {lang === 'es' ? '🌅 Adhkar de la mañana' : lang === 'ar' ? '🌅 أذكار الصباح' : '🌅 Morning Adhkar'}
+                </span>
+                <span className="text-[9px] text-[#A7F3D0]/60 block mt-0.5 leading-normal max-w-[220px]">
+                  {lang === 'es' ? `${settings.adhkarMorningOffset ?? 30} min después del Fajr` : lang === 'ar' ? `بعد الفجر بـ ${settings.adhkarMorningOffset ?? 30} دقيقة` : `${settings.adhkarMorningOffset ?? 30} min after Fajr`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSetting('adhkarMorningReminder', !settings.adhkarMorningReminder)}
+                className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-300 ${settings.adhkarMorningReminder ? 'bg-[#059669]' : 'bg-black/40'}`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-white transition-transform duration-300 ${settings.adhkarMorningReminder ? 'translate-x-6' : 'translate-x-0'}`} />
+              </button>
+            </div>
+
+            {/* Evening Adhkar Reminder */}
+            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+              <div>
+                <span className="font-bold text-white text-xs block">
+                  {lang === 'es' ? '🌙 Adhkar de la tarde' : lang === 'ar' ? '🌙 أذكار المساء' : '🌙 Evening Adhkar'}
+                </span>
+                <span className="text-[9px] text-[#A7F3D0]/60 block mt-0.5 leading-normal max-w-[220px]">
+                  {lang === 'es' ? `${settings.adhkarEveningOffset ?? 30} min después del Asr` : lang === 'ar' ? `بعد العصر بـ ${settings.adhkarEveningOffset ?? 30} دقيقة` : `${settings.adhkarEveningOffset ?? 30} min after Asr`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSetting('adhkarEveningReminder', !settings.adhkarEveningReminder)}
+                className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-300 ${settings.adhkarEveningReminder ? 'bg-[#059669]' : 'bg-black/40'}`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-white transition-transform duration-300 ${settings.adhkarEveningReminder ? 'translate-x-6' : 'translate-x-0'}`} />
+              </button>
+            </div>
+
             {/* Fasting Reminders Toggle */}
             <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
               <div>

@@ -110,6 +110,27 @@ const JUMUAH_BODIES: Record<string, string> = {
   ru: 'Джум\'а через 30 минут. Приготовьтесь к намазу.',
 };
 
+const ADHKAR_TITLES: Record<string, string> = {
+  en: 'Adhkar Reminder', es: 'Recordatorio de Adhkar', ar: 'تذكير الأذكار',
+  fr: 'Rappel des Adhkar', de: 'Adhkar-Erinnerung', tr: 'Zikir Hatırlatıcısı', pt: 'Lembrete de Adhkar',
+};
+const ADHKAR_MORNING_BODIES: Record<string, string> = {
+  en: 'Time for your morning adhkar.', es: 'Es hora de tus adhkar de la mañana.', ar: 'حان وقت أذكار الصباح.',
+  fr: 'C\'est l\'heure de vos adhkar du matin.', de: 'Zeit für deine Morgen-Adhkar.', tr: 'Sabah zikirlerinin vakti.', pt: 'Hora dos seus adhkar da manhã.',
+};
+const ADHKAR_EVENING_BODIES: Record<string, string> = {
+  en: 'Time for your evening adhkar.', es: 'Es hora de tus adhkar de la tarde.', ar: 'حان وقت أذكار المساء.',
+  fr: 'C\'est l\'heure de vos adhkar du soir.', de: 'Zeit für deine Abend-Adhkar.', tr: 'Akşam zikirlerinin vakti.', pt: 'Hora dos seus adhkar da tarde.',
+};
+const KHATMAH_TITLES: Record<string, string> = {
+  en: 'Quran Reading', es: 'Lectura del Corán', ar: 'ورد القرآن',
+  fr: 'Lecture du Coran', de: 'Koran-Lesung', tr: 'Kur\'an Okuma', pt: 'Leitura do Alcorão',
+};
+const KHATMAH_BODIES: Record<string, string> = {
+  en: 'Keep up your khatmah — read today\'s pages.', es: 'Continúa tu khatmah — lee las páginas de hoy.', ar: 'واصل ختمتك — اقرأ ورد اليوم.',
+  fr: 'Continuez votre khatmah — lisez les pages du jour.', de: 'Setze deine Khatmah fort — lies die heutigen Seiten.', tr: 'Hatmine devam et — bugünün sayfalarını oku.', pt: 'Continue sua khatmah — leia as páginas de hoje.',
+};
+
 function isInSilentHours(hour: number, start: number, end: number): boolean {
   if (start === end) return false;
   if (start > end) return hour >= start || hour < end;
@@ -203,6 +224,46 @@ function buildSchedule(
           }
         }
       }
+
+      // Adhkar reminders — N minutes after Fajr (morning) / Asr (evening).
+      if (prayer === 'Fajr' && settings.adhkarMorningReminder) {
+        const ad = new Date(prayerDate.getTime());
+        ad.setMinutes(ad.getMinutes() + (settings.adhkarMorningOffset ?? 30));
+        if (ad.getTime() > now) {
+          schedule.push({
+            prayer: 'adhkar_morning',
+            ts: ad.getTime(),
+            title: ADHKAR_TITLES[lang] ?? ADHKAR_TITLES.en,
+            body: ADHKAR_MORNING_BODIES[lang] ?? ADHKAR_MORNING_BODIES.en,
+          });
+        }
+      }
+      if (prayer === 'Asr' && settings.adhkarEveningReminder) {
+        const ad = new Date(prayerDate.getTime());
+        ad.setMinutes(ad.getMinutes() + (settings.adhkarEveningOffset ?? 30));
+        if (ad.getTime() > now) {
+          schedule.push({
+            prayer: 'adhkar_evening',
+            ts: ad.getTime(),
+            title: ADHKAR_TITLES[lang] ?? ADHKAR_TITLES.en,
+            body: ADHKAR_EVENING_BODIES[lang] ?? ADHKAR_EVENING_BODIES.en,
+          });
+        }
+      }
+    }
+
+    // Khatmah — daily Quran reading reminder at the chosen hour.
+    if (settings.khatmahActive && settings.khatmahReminder) {
+      const kd = new Date(baseDate);
+      kd.setHours(settings.khatmahReminderHour ?? 9, 0, 0, 0);
+      if (kd.getTime() > now) {
+        schedule.push({
+          prayer: 'khatmah',
+          ts: kd.getTime(),
+          title: KHATMAH_TITLES[lang] ?? KHATMAH_TITLES.en,
+          body: KHATMAH_BODIES[lang] ?? KHATMAH_BODIES.en,
+        });
+      }
     }
   }
 
@@ -238,6 +299,9 @@ export function usePushNotifications() {
       settings.silentHoursEnabled ?? false,
       settings.silentHoursStart ?? 23,
       settings.silentHoursEnd ?? 5,
+      settings.adhkarMorningReminder, settings.adhkarEveningReminder,
+      settings.adhkarMorningOffset, settings.adhkarEveningOffset,
+      settings.khatmahActive, settings.khatmahReminder, settings.khatmahReminderHour,
       prayerData.date.gregorian.date,
       prayerData.meta?.latitude?.toFixed(3),
       prayerData.meta?.longitude?.toFixed(3),

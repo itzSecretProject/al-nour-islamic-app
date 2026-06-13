@@ -411,7 +411,8 @@ export default async function handler(req: any, res: any) {
       const claimed = await claimPrayerSend(`${key}_${tsMin}`);
       if (!claimed) continue;
       try {
-        const isPreAlert = entry.prayer.endsWith('_pre') || entry.prayer === 'jumuah';
+        const isPreAlert = entry.prayer.endsWith('_pre') || entry.prayer === 'jumuah'
+          || entry.prayer === 'adhkar_morning' || entry.prayer === 'adhkar_evening' || entry.prayer === 'khatmah';
         // `topic` (URL-safe, ≤32 chars) tells the push service to REPLACE any earlier
         // still-undelivered push for the same prayer instead of queuing both — so an
         // offline device that reconnects gets at most one push per prayer.

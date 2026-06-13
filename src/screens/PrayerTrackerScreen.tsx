@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Flame, Check, Star, ChevronLeft, ChevronRight, Pencil, Download } from 'lucide-react';
+import { X, Flame, Check, Star, ChevronLeft, ChevronRight, Pencil, Download, Share2, RotateCcw } from 'lucide-react';
+import { shareStreakCard } from '../utils/shareCard';
 import { useSettings } from '../hooks/useSettings';
 import { isAccountable } from '../context/SettingsContext';
 import {
@@ -22,25 +23,36 @@ const T: Record<string, Record<string, string>> = {
   en: {
     title: 'Prayer Tracker', streak: 'Day streak', today: "Today's prayers",
     monthRate: 'completed', tap: 'Tap to log', kidStreak: 'Days you prayed',
-    encAdult: 'Keep your streak alive — consistency is beloved to Allah.',
+    encAdult: 'Salah is an obligation before Allah — what is missed is made up, never lost.',
     encChild: 'Every prayer is a beautiful step. No pressure — you are learning!',
     history: 'History', editDay: 'Edit day', tapDay: 'Tap any day to log or fix it', back: 'Today',
+    qadaTitle: 'Pending to make up (qada)', qadaDesc: 'Missed prayers are a debt before Allah — make them up when you can.',
+    qadaDone: 'I made one up', qadaNone: 'Nothing pending to make up — ma sha Allah.',
+    byPrayer: 'This month by prayer',
   },
   es: {
     title: 'Registro de Rezos', streak: 'Días seguidos', today: 'Rezos de hoy',
     monthRate: 'completados', tap: 'Toca para registrar', kidStreak: 'Días que rezaste',
-    encAdult: 'Mantén tu racha — la constancia es amada por Allah.',
+    encAdult: 'El rezo es una obligación ante Allah — lo perdido se recupera, nunca se pierde.',
     encChild: 'Cada rezo es un paso precioso. Sin presión, ¡estás aprendiendo!',
     history: 'Historial', editDay: 'Editar día', tapDay: 'Toca cualquier día para registrarlo o corregirlo', back: 'Hoy',
+    qadaTitle: 'Pendientes de recuperar (qada)', qadaDesc: 'Los rezos perdidos son una deuda ante Allah — recupéralos cuando puedas.',
+    qadaDone: 'He recuperado uno', qadaNone: 'Nada pendiente de recuperar — ma sha Allah.',
+    byPrayer: 'Este mes por rezo',
   },
   ar: {
     title: 'سجل الصلاة', streak: 'أيام متتالية', today: 'صلوات اليوم',
     monthRate: 'مكتملة', tap: 'اضغط للتسجيل', kidStreak: 'أيام صليت فيها',
-    encAdult: 'حافظ على استمراريتك — المداومة محبوبة عند الله.',
+    encAdult: 'الصلاة فرض أمام الله — ما فات يُقضى ولا يضيع.',
     encChild: 'كل صلاة خطوة جميلة. بلا ضغط، أنت تتعلم!',
     history: 'السجل', editDay: 'تعديل اليوم', tapDay: 'اضغط أي يوم لتسجيله أو تصحيحه', back: 'اليوم',
+    qadaTitle: 'صلوات للقضاء', qadaDesc: 'الصلوات الفائتة دين أمام الله — اقضها متى استطعت.',
+    qadaDone: 'قضيت واحدة', qadaNone: 'لا شيء للقضاء — ما شاء الله.',
+    byPrayer: 'هذا الشهر حسب الصلاة',
   },
 };
+
+const QADA_KEY = 'qada_recovered_v1';
 
 interface Props {
   onClose: () => void;
@@ -61,6 +73,21 @@ export function PrayerTrackerScreen({ onClose }: Props) {
   const [view, setView] = useState(() => ({ y: now.getFullYear(), m: now.getMonth() }));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
+  // ── Qada: missed prayers are an obligation to make up, not a "lost game" ──
+  const [qadaRecovered, setQadaRecovered] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem(QADA_KEY) || '0', 10) || 0; } catch { return 0; }
+  });
+  let totalMissed = 0;
+  for (const day of Object.values(log)) {
+    totalMissed += OBLIGATORY_PRAYERS.filter(p => (day as any)[p] === 'missed').length;
+  }
+  const qadaPending = Math.max(0, totalMissed - qadaRecovered);
+  const recoverOne = () => {
+    const next = Math.min(totalMissed, qadaRecovered + 1);
+    setQadaRecovered(next);
+    try { localStorage.setItem(QADA_KEY, String(next)); } catch {}
+  };
+
   const cycle = (date: string, prayer: ObligatoryPrayer) => {
     const cur = log[date]?.[prayer];
     if (isKid) {
@@ -79,15 +106,17 @@ export function PrayerTrackerScreen({ onClose }: Props) {
   const monthTitle = new Date(view.y, view.m, 1).toLocaleDateString(loc, { month: 'long', year: 'numeric' });
   const isCurrentMonth = view.y === now.getFullYear() && view.m === now.getMonth();
 
-  // Month completion %
+  // Month completion % + per-prayer breakdown (spot the weakest prayer, e.g. Fajr)
   let mPrayed = 0, mTotal = 0;
+  const perPrayer: Record<ObligatoryPrayer, { prayed: number; total: number }> =
+    Object.fromEntries(OBLIGATORY_PRAYERS.map(p => [p, { prayed: 0, total: 0 }])) as any;
   for (let d = 1; d <= daysInMonth; d++) {
     const key = localDateKey(new Date(view.y, view.m, d));
     const day = log[key];
     if (!day) continue;
     for (const p of OBLIGATORY_PRAYERS) {
-      if (day[p] === 'prayed') { mPrayed++; mTotal++; }
-      else if (day[p] === 'missed') { mTotal++; }
+      if (day[p] === 'prayed') { mPrayed++; mTotal++; perPrayer[p].prayed++; perPrayer[p].total++; }
+      else if (day[p] === 'missed') { mTotal++; perPrayer[p].total++; }
     }
   }
   const pct = mTotal > 0 ? Math.round((mPrayed / mTotal) * 100) : 0;
@@ -132,13 +161,55 @@ export function PrayerTrackerScreen({ onClose }: Props) {
             <div className="w-16 h-16 rounded-2xl bg-[#FCD34D]/15 border border-[#FCD34D]/30 flex items-center justify-center shrink-0">
               {isKid ? <Star size={30} className="text-[#FCD34D] fill-[#FCD34D]/40" /> : <Flame size={30} className="text-[#FCD34D]" />}
             </div>
-            <div>
+            <div className="flex-1">
               <div className="text-5xl font-black text-white tabular-nums leading-none">{streak}</div>
               <p className="text-xs text-[#A7F3D0] font-bold uppercase tracking-widest mt-1.5">{isKid ? t.kidStreak : t.streak}</p>
             </div>
+            {streak > 0 && (
+              <button
+                onClick={() => shareStreakCard(streak, lang)}
+                className="p-3 rounded-2xl bg-[#FCD34D]/15 border border-[#FCD34D]/30 text-[#FCD34D] active:scale-90 transition-all shrink-0"
+                title="Share"
+              >
+                <Share2 size={18} />
+              </button>
+            )}
           </div>
           <p className="text-xs text-[#A7F3D0]/80 leading-relaxed mt-4 relative">{isKid ? t.encChild : t.encAdult}</p>
         </div>
+
+        {/* Qada — obligation framing for accountable users: missed = to make up, not "failed" */}
+        {accountable && (
+          <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-5 mb-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl border flex items-center justify-center shrink-0 ${
+                  qadaPending > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-[#059669]/15 border-[#059669]/30'}`}>
+                  <RotateCcw size={18} className={qadaPending > 0 ? 'text-amber-300' : 'text-emerald-300'} />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-white">{t.qadaTitle}</p>
+                  <p className="text-[10px] text-[#A7F3D0]/60 mt-0.5 leading-relaxed max-w-[200px]">
+                    {qadaPending > 0 ? t.qadaDesc : t.qadaNone}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <span className={`text-2xl font-black tabular-nums ${qadaPending > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                  {qadaPending}
+                </span>
+                {qadaPending > 0 && (
+                  <button
+                    onClick={recoverOne}
+                    className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-[#059669] text-white active:scale-95 transition-all"
+                  >
+                    {t.qadaDone}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Today quick row */}
         <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-5 mb-5 shadow-xl">
@@ -190,6 +261,29 @@ export function PrayerTrackerScreen({ onClose }: Props) {
               <ChevronRight size={16} />
             </button>
           </div>
+
+          {/* Per-prayer completion bars for the viewed month */}
+          {mTotal > 0 && (
+            <div className="mb-4 space-y-1.5">
+              <p className="text-[9px] font-bold text-[#A7F3D0]/40 uppercase tracking-widest mb-2">{t.byPrayer}</p>
+              {OBLIGATORY_PRAYERS.map((p) => {
+                const s = perPrayer[p];
+                const ppc = s.total > 0 ? Math.round((s.prayed / s.total) * 100) : 0;
+                return (
+                  <div key={p} className="flex items-center gap-2">
+                    <span className="text-[9px] font-bold text-[#A7F3D0]/70 w-14 shrink-0">{pl[p]}</span>
+                    <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${ppc >= 80 ? 'bg-[#059669]' : ppc >= 50 ? 'bg-[#FCD34D]/70' : 'bg-amber-600/70'}`}
+                        style={{ width: `${ppc}%` }}
+                      />
+                    </div>
+                    <span className="text-[9px] font-mono text-[#A7F3D0]/50 w-8 text-right tabular-nums">{s.total > 0 ? `${ppc}%` : '—'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <p className="text-[10px] text-[#A7F3D0]/40 text-center mb-3">{t.tapDay}</p>
 
