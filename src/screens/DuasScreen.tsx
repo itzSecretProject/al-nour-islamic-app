@@ -6,17 +6,7 @@ import { useSettings } from '../hooks/useSettings';
 import { translations } from '../utils/translations';
 import { shareAyahCard } from '../utils/shareCard';
 import { FriendPickerModal } from '../components/social/FriendPickerModal';
-
-function speakArabic(text: string, onEnd?: () => void) {
-  if (!('speechSynthesis' in window)) { onEnd?.(); return; }
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'ar-SA';
-  u.rate = 0.75;
-  u.pitch = 1.0;
-  if (onEnd) { u.onend = onEnd; u.onerror = onEnd; }
-  window.speechSynthesis.speak(u);
-}
+import { speakArabic } from '../utils/speak';
 
 const CATEGORY_TRANSLATIONS: Record<string, Record<string, string>> = {
   en: {

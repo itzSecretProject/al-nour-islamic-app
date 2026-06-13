@@ -1,8 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { ChevronLeft, Play, Pause, Loader2, Languages } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Loader2, Languages, Palette } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 import { useScrollLock } from '../utils/useScrollLock';
+
+// Palette for the active-word highlight (user-configurable, persisted in settings).
+const HIGHLIGHT_COLORS = ['#FCD34D', '#34D399', '#60A5FA', '#F472B6', '#FB923C', '#A78BFA', '#F87171', '#2DD4BF'];
+
+// Pick readable text color (black/white) for a given hex background.
+function textOn(hex: string): string {
+  const c = hex.replace('#', '');
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#011410' : '#FFFFFF';
+}
 
 // Word-by-word reader: highlights each Arabic word in sync with the recitation
 // (Mishary Alafasy), using quran.com's per-word audio segment timings.
@@ -26,9 +36,9 @@ const WORD_TR_LANG: Record<string, string> = {
 };
 
 const T: Record<string, Record<string, string>> = {
-  en: { reciter: 'Mishary Alafasy', words: 'Show word meanings', ayah: 'Ayah', loading: 'Loading…', err: 'Could not load. Check your connection.' },
-  es: { reciter: 'Mishary Alafasy', words: 'Mostrar significado de palabras', ayah: 'Aleya', loading: 'Cargando…', err: 'No se pudo cargar. Revisa tu conexión.' },
-  ar: { reciter: 'مشاري العفاسي', words: 'إظهار معاني الكلمات', ayah: 'آية', loading: 'جارٍ التحميل…', err: 'تعذّر التحميل. تحقق من الاتصال.' },
+  en: { reciter: 'Mishary Alafasy', words: 'Show word meanings', ayah: 'Ayah', loading: 'Loading…', err: 'Could not load. Check your connection.', color: 'Highlight' },
+  es: { reciter: 'Mishary Alafasy', words: 'Mostrar significado de palabras', ayah: 'Aleya', loading: 'Cargando…', err: 'No se pudo cargar. Revisa tu conexión.', color: 'Resaltado' },
+  ar: { reciter: 'مشاري العفاسي', words: 'إظهار معاني الكلمات', ayah: 'آية', loading: 'جارٍ التحميل…', err: 'تعذّر التحميل. تحقق من الاتصال.', color: 'التظليل' },
 };
 
 // Normalize a segment to { pos, start, end } (some are 4-el, some 3-el).
@@ -45,10 +55,13 @@ interface Props {
 
 export function WordByWordScreen({ surah, surahName, onClose }: Props) {
   useScrollLock();
-  const { settings } = useSettings();
+  const { settings, updateSetting } = useSettings();
   const lang = settings.language || 'es';
   const t = T[lang] || T.en;
   const isRTL = lang === 'ar';
+  const hl = settings.wbwHighlightColor || '#FCD34D';
+  const hlText = textOn(hl);
+  const [showPalette, setShowPalette] = useState(false);
 
   const [verses, setVerses] = useState<WBWVerse[] | null>(null);
   const [error, setError] = useState(false);
@@ -125,10 +138,6 @@ export function WordByWordScreen({ surah, surahName, onClose }: Props) {
 
     try {
       await el.play();
-      // Auto-scroll the playing ayah into view.
-      requestAnimationFrame(() => {
-        document.getElementById(`wbw-ayah-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
     } catch {
       if (tokenRef.current === token) stop();
     }
@@ -158,6 +167,13 @@ export function WordByWordScreen({ surah, surahName, onClose }: Props) {
             <p className="text-[10px] text-[#A7F3D0]/60 uppercase tracking-widest font-semibold">{t.reciter}</p>
           </div>
           <button
+            onClick={() => setShowPalette(s => !s)}
+            className={`p-2.5 rounded-full border transition-colors shrink-0 ${showPalette ? 'border-white/30 bg-white/10' : 'bg-white/5 border-white/10'}`}
+            title={t.color}
+          >
+            <Palette size={18} style={{ color: hl }} />
+          </button>
+          <button
             onClick={() => setShowWordTr(s => !s)}
             className={`p-2.5 rounded-full border transition-colors shrink-0 ${showWordTr ? 'bg-[#059669]/20 border-[#059669]/40 text-[#FCD34D]' : 'bg-white/5 border-white/10 text-[#A7F3D0]/60'}`}
             title={t.words}
@@ -165,6 +181,22 @@ export function WordByWordScreen({ surah, surahName, onClose }: Props) {
             <Languages size={18} />
           </button>
         </div>
+
+        {/* Highlight color palette */}
+        {showPalette && (
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <span className="text-[10px] text-[#A7F3D0]/60 font-bold uppercase tracking-widest">{t.color}</span>
+            {HIGHLIGHT_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => updateSetting('wbwHighlightColor', c)}
+                className={`w-7 h-7 rounded-full border-2 transition-transform active:scale-90 ${hl === c ? 'border-white scale-110' : 'border-white/20'}`}
+                style={{ backgroundColor: c }}
+                aria-label={c}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Body */}
@@ -206,13 +238,20 @@ export function WordByWordScreen({ surah, surahName, onClose }: Props) {
                         <div key={key} className="flex flex-col items-center px-1.5">
                           <span
                             className={`leading-loose transition-all duration-150 rounded-lg px-1.5 ${isEnd ? 'text-[#FCD34D]/70 text-xl' : 'text-2xl'} ${
-                              isActive ? 'bg-[#FCD34D] text-[#011410] scale-110 font-semibold shadow-lg' : 'text-white'}`}
-                            style={{ fontFamily: 'Amiri, serif' }}
+                              isActive ? 'scale-110 font-semibold shadow-lg' : isEnd ? '' : 'text-white'}`}
+                            style={{
+                              fontFamily: 'Amiri, serif',
+                              ...(isActive ? { backgroundColor: hl, color: hlText } : {}),
+                            }}
                           >
                             {w.text_uthmani}
                           </span>
                           {showWordTr && !isEnd && w.translation?.text && (
-                            <span dir="ltr" className={`text-[9px] mt-1 leading-tight text-center max-w-[80px] ${isActive ? 'text-[#FCD34D]' : 'text-[#A7F3D0]/45'}`}>
+                            <span
+                              dir="ltr"
+                              className="text-[9px] mt-1 leading-tight text-center max-w-[80px]"
+                              style={{ color: isActive ? hl : 'rgba(167,243,208,0.45)' }}
+                            >
                               {w.translation.text}
                             </span>
                           )}

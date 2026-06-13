@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft, Users, UserPlus, Search, Inbox as InboxIcon, Flame, Brain,
   Check, X, Loader2, Headphones, Hand, BookOpen, Mail, Sparkles,
-  Pencil, Camera, Save,
+  Pencil, Camera, Save, Trophy, Plus, Crown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSettings } from '../hooks/useSettings';
@@ -11,7 +11,8 @@ import { useInbox } from '../hooks/useInbox';
 import { ListenRoom } from '../components/social/ListenRoom';
 import {
   searchUsers, loadGraph, sendFriendRequest, acceptRequest, removeFriendship,
-  shareItem, type SocialGraph, type SearchResult,
+  shareItem, loadChallenges, createChallenge, leaveChallenge,
+  type SocialGraph, type SearchResult, type ChallengeWithStandings, type ChallengeMetric,
 } from '../api/social';
 
 type Lang = 'en' | 'es' | 'ar' | 'fr' | 'de' | 'tr' | 'pt';
@@ -19,6 +20,13 @@ const T: Record<string, Record<string, string>> = {
   en: { title: 'Community', subtitle: 'Friends & shared worship', friends: 'Friends', requests: 'Requests', search: 'Search', inbox: 'Inbox', signIn: 'Sign in to connect', google: 'Continue with Google', email: 'Email', password: 'Password', login: 'Sign in', register: 'Create account', toReg: "No account? Register", toLog: 'Have an account? Sign in', name: 'Display name', searchPh: 'Search by username…', add: 'Add', sent: 'Sent', accept: 'Accept', decline: 'Decline', remove: 'Remove', noFriends: 'No friends yet. Search to add some!', noReq: 'No pending requests', noInbox: 'Your inbox is empty', streak: 'streak', memorized: 'memorized', nudge: 'Nudge', listen: 'Listen together', incoming: 'Incoming', outgoing: 'Sent', dayStreak: 'day streak', nudgeSent: 'Nudge sent!', markRead: 'Mark read', from: 'from', editProfile: 'Edit profile', bioLabel: 'Bio', saveProfile: 'Save', cancelEdit: 'Cancel', uploadPhoto: 'Upload photo', searchEmpty: 'No results. Try a different username.' },
   es: { title: 'Comunidad', subtitle: 'Amigos y adoración compartida', friends: 'Amigos', requests: 'Solicitudes', search: 'Buscar', inbox: 'Bandeja', signIn: 'Inicia sesión para conectar', google: 'Continuar con Google', email: 'Correo', password: 'Contraseña', login: 'Entrar', register: 'Crear cuenta', toReg: '¿Sin cuenta? Regístrate', toLog: '¿Ya tienes cuenta? Entra', name: 'Nombre visible', searchPh: 'Buscar por usuario…', add: 'Añadir', sent: 'Enviada', accept: 'Aceptar', decline: 'Rechazar', remove: 'Eliminar', noFriends: 'Aún no tienes amigos. ¡Busca para añadir!', noReq: 'No hay solicitudes pendientes', noInbox: 'Tu bandeja está vacía', streak: 'racha', memorized: 'memorizadas', nudge: 'Animar', listen: 'Escuchar juntos', incoming: 'Recibidas', outgoing: 'Enviadas', dayStreak: 'días de racha', nudgeSent: '¡Ánimo enviado!', markRead: 'Marcar leído', from: 'de', editProfile: 'Editar perfil', bioLabel: 'Descripción', saveProfile: 'Guardar', cancelEdit: 'Cancelar', uploadPhoto: 'Subir foto', searchEmpty: 'Sin resultados. Prueba otro usuario.' },
   ar: { title: 'المجتمع', subtitle: 'الأصدقاء والعبادة المشتركة', friends: 'الأصدقاء', requests: 'الطلبات', search: 'بحث', inbox: 'الوارد', signIn: 'سجّل الدخول للتواصل', google: 'المتابعة مع Google', email: 'البريد', password: 'كلمة المرور', login: 'دخول', register: 'إنشاء حساب', toReg: 'لا حساب؟ سجّل', toLog: 'لديك حساب؟ ادخل', name: 'الاسم الظاهر', searchPh: 'ابحث باسم المستخدم…', add: 'إضافة', sent: 'مُرسلة', accept: 'قبول', decline: 'رفض', remove: 'إزالة', noFriends: 'لا أصدقاء بعد. ابحث لإضافتهم!', noReq: 'لا طلبات معلقة', noInbox: 'الوارد فارغ', streak: 'تتابع', memorized: 'محفوظة', nudge: 'تشجيع', listen: 'الاستماع معًا', incoming: 'واردة', outgoing: 'مرسلة', dayStreak: 'يوم تتابع', nudgeSent: 'تم إرسال التشجيع!', markRead: 'تعليم كمقروء', from: 'من', editProfile: 'تعديل الملف', bioLabel: 'نبذة', saveProfile: 'حفظ', cancelEdit: 'إلغاء', uploadPhoto: 'رفع صورة', searchEmpty: 'لا نتائج. جرّب اسمًا آخر.' },
+};
+
+// Challenge strings
+const TC: Record<string, Record<string, string>> = {
+  en: { tab: 'Challenges', none: 'No challenges yet. Create one and invite friends!', create: 'New challenge', title: 'Challenge name', defaultTitle: 'Streak race', metric: 'Compete on', mStreak: 'Prayer streak', mMem: 'Duas memorized', mPrayers: 'Prayers today', target: 'Goal', duration: 'Duration', days: 'days', invite: 'Invite friends', start: 'Start challenge', created: 'Challenge created!', you: 'You', leave: 'Leave', endsIn: 'ends in', ended: 'ended', noFriendsInvite: 'Add friends first to invite them.', target2: 'reach' },
+  es: { tab: 'Retos', none: 'Aún no hay retos. ¡Crea uno e invita amigos!', create: 'Nuevo reto', title: 'Nombre del reto', defaultTitle: 'Carrera de racha', metric: 'Competir en', mStreak: 'Racha de rezos', mMem: 'Duas memorizadas', mPrayers: 'Rezos de hoy', target: 'Meta', duration: 'Duración', days: 'días', invite: 'Invitar amigos', start: 'Empezar reto', created: '¡Reto creado!', you: 'Tú', leave: 'Salir', endsIn: 'termina en', ended: 'terminado', noFriendsInvite: 'Añade amigos primero para invitarlos.', target2: 'llegar a' },
+  ar: { tab: 'التحديات', none: 'لا تحديات بعد. أنشئ واحدًا وادعُ أصدقاءك!', create: 'تحدٍ جديد', title: 'اسم التحدي', defaultTitle: 'سباق المداومة', metric: 'التنافس في', mStreak: 'مداومة الصلاة', mMem: 'أدعية محفوظة', mPrayers: 'صلوات اليوم', target: 'الهدف', duration: 'المدة', days: 'يوم', invite: 'دعوة الأصدقاء', start: 'ابدأ التحدي', created: 'تم إنشاء التحدي!', you: 'أنت', leave: 'مغادرة', endsIn: 'ينتهي خلال', ended: 'انتهى', noFriendsInvite: 'أضف أصدقاء أولاً لدعوتهم.', target2: 'الوصول إلى' },
 };
 
 function roomFor(a: string, b: string) { return [a, b].sort().join('_'); }
@@ -29,12 +37,22 @@ export function CommunityScreen({ onClose }: Props) {
   const { settings } = useSettings();
   const lang = (settings.language as Lang) || 'en';
   const t = T[lang] || T.en;
+  const tc = (TC[lang] || TC.en);
   const isRTL = lang === 'ar';
 
   const { enabled, ready, user, profile, signInWithGoogle, signInEmail, signUpEmail, updateProfile } = useAuth();
   const { items, unread, markItemRead } = useInbox();
 
-  const [tab, setTab] = useState<'friends' | 'requests' | 'search' | 'inbox'>('friends');
+  const [tab, setTab] = useState<'friends' | 'requests' | 'search' | 'inbox' | 'challenges'>('friends');
+  const [challenges, setChallenges] = useState<ChallengeWithStandings[]>([]);
+  const [loadingCh, setLoadingCh] = useState(false);
+  const [creatingCh, setCreatingCh] = useState(false);
+  const [chTitle, setChTitle] = useState('');
+  const [chMetric, setChMetric] = useState<ChallengeMetric>('streak');
+  const [chTarget, setChTarget] = useState(7);
+  const [chDays, setChDays] = useState(7);
+  const [chFriends, setChFriends] = useState<string[]>([]);
+  const [chBusy, setChBusy] = useState(false);
   const [graph, setGraph] = useState<SocialGraph>({ friends: [], incoming: [], outgoing: [] });
   const [loadingGraph, setLoadingGraph] = useState(false);
   const [q, setQ] = useState('');
@@ -75,6 +93,28 @@ export function CommunityScreen({ onClose }: Props) {
   }, [user]);
 
   useEffect(() => { if (user) refreshGraph(); }, [user, refreshGraph]);
+
+  const refreshChallenges = useCallback(async () => {
+    if (!user) return;
+    setLoadingCh(true);
+    setChallenges(await loadChallenges(user.id));
+    setLoadingCh(false);
+  }, [user]);
+
+  useEffect(() => { if (user && tab === 'challenges') refreshChallenges(); }, [user, tab, refreshChallenges]);
+
+  const submitChallenge = async () => {
+    if (!user || chBusy) return;
+    const title = chTitle.trim() || (tc.defaultTitle);
+    setChBusy(true);
+    const { error } = await createChallenge(user.id, title, chMetric, chTarget, chFriends, chDays);
+    setChBusy(false);
+    if (error) { flash(error); return; }
+    setCreatingCh(false);
+    setChTitle(''); setChFriends([]); setChMetric('streak'); setChTarget(7); setChDays(7);
+    flash(tc.created);
+    refreshChallenges();
+  };
 
   const doSearch = async (term = q) => {
     if (!term.trim()) return;
@@ -263,6 +303,7 @@ export function CommunityScreen({ onClose }: Props) {
   const tabs = [
     { id: 'friends' as const, icon: <Users size={15} />, label: t.friends, badge: 0 },
     { id: 'requests' as const, icon: <UserPlus size={15} />, label: t.requests, badge: graph.incoming.length },
+    { id: 'challenges' as const, icon: <Trophy size={15} />, label: tc.tab, badge: 0 },
     { id: 'search' as const, icon: <Search size={15} />, label: t.search, badge: 0 },
     { id: 'inbox' as const, icon: <InboxIcon size={15} />, label: t.inbox, badge: unread },
   ];
@@ -381,7 +422,7 @@ export function CommunityScreen({ onClose }: Props) {
       </div>
 
       {/* Content */}
-      {loadingGraph && tab !== 'inbox' && tab !== 'search'
+      {loadingGraph && tab !== 'inbox' && tab !== 'search' && tab !== 'challenges'
         ? <div className="grid place-items-center py-12"><Loader2 className="animate-spin text-[#FCD34D]" /></div>
         : (
           <div className="space-y-3">
@@ -484,8 +525,136 @@ export function CommunityScreen({ onClose }: Props) {
                   </div>
                 ))
             )}
+
+            {tab === 'challenges' && (
+              <>
+                <button
+                  onClick={() => { setChFriends([]); setCreatingCh(true); }}
+                  className="w-full mb-3 py-3 rounded-2xl bg-[#FCD34D]/12 border border-[#FCD34D]/30 text-[#FCD34D] text-xs font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                >
+                  <Plus size={15} /> {tc.create}
+                </button>
+
+                {loadingCh ? (
+                  <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin text-[#FCD34D]" /></div>
+                ) : challenges.length === 0 ? (
+                  <p className="text-center text-[13px] text-[#A7F3D0]/50 py-10">{tc.none}</p>
+                ) : (
+                  challenges.map((c) => {
+                    const isCreator = c.creator === user!.id;
+                    const ended = c.ends_at ? new Date(c.ends_at) < new Date() : false;
+                    const daysLeft = c.ends_at ? Math.ceil((new Date(c.ends_at).getTime() - Date.now()) / 86400000) : null;
+                    const metricLabel = c.metric === 'streak' ? tc.mStreak : c.metric === 'memorized' ? tc.mMem : tc.mPrayers;
+                    return (
+                      <div key={c.id} className="border border-white/10 rounded-2xl p-4 bg-white/[0.02] mb-3">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Trophy size={14} className="text-[#FCD34D] shrink-0" />
+                              <p className="text-sm font-bold text-white truncate">{c.title}</p>
+                            </div>
+                            <p className="text-[10px] text-[#A7F3D0]/50 mt-0.5">
+                              {metricLabel} · {tc.target2} {c.target}
+                              {daysLeft != null && ` · ${ended ? tc.ended : `${tc.endsIn} ${Math.max(0, daysLeft)} ${tc.days}`}`}
+                            </p>
+                          </div>
+                          <button onClick={async () => { await leaveChallenge(user!.id, c.id, isCreator); refreshChallenges(); }} className="text-[10px] text-[#A7F3D0]/40 hover:text-red-300 shrink-0 ml-2">{tc.leave}</button>
+                        </div>
+                        <div className="space-y-1.5">
+                          {c.standings.map((s, i) => {
+                            const isMe = s.profile.id === user!.id;
+                            const reached = s.value >= c.target;
+                            return (
+                              <div key={s.profile.id} className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl ${isMe ? 'bg-[#059669]/15 border border-[#059669]/25' : 'bg-white/[0.02]'}`}>
+                                <span className={`w-5 text-center text-xs font-black ${i === 0 ? 'text-[#FCD34D]' : 'text-[#A7F3D0]/40'}`}>{i === 0 ? <Crown size={13} className="inline" /> : i + 1}</span>
+                                <span className="text-xs font-semibold text-white flex-1 truncate">{isMe ? tc.you : (s.profile.display_name || s.profile.username)}</span>
+                                {reached && <Check size={13} className="text-emerald-400" />}
+                                <span className={`text-sm font-black tabular-nums ${i === 0 ? 'text-[#FCD34D]' : 'text-white'}`}>{s.value}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </>
+            )}
           </div>
         )}
+
+        {/* Create-challenge modal */}
+        <AnimatePresence>
+          {creatingCh && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+              onClick={() => setCreatingCh(false)}
+            >
+              <motion.div
+                initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md bg-[#022C22] border border-white/10 rounded-3xl p-5 max-h-[85vh] overflow-y-auto app-scroll"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-bold text-[#FCD34D] flex items-center gap-2"><Trophy size={17} /> {tc.create}</h3>
+                  <button onClick={() => setCreatingCh(false)} className="p-1.5 text-[#A7F3D0]/60 hover:text-white"><X size={18} /></button>
+                </div>
+
+                <input
+                  value={chTitle} onChange={(e) => setChTitle(e.target.value)} placeholder={tc.title}
+                  className="w-full mb-3 px-3.5 py-3 rounded-2xl bg-white/[0.03] border border-white/10 text-white text-sm placeholder-white/30 focus:outline-none focus:border-[#FCD34D]"
+                />
+
+                <label className="text-[10px] font-bold text-[#A7F3D0]/50 uppercase tracking-widest">{tc.metric}</label>
+                <div className="grid grid-cols-3 gap-2 mt-1.5 mb-3">
+                  {([['streak', tc.mStreak, <Flame size={14} />], ['memorized', tc.mMem, <Brain size={14} />], ['prayers_today', tc.mPrayers, <Check size={14} />]] as const).map(([m, label, icon]) => (
+                    <button key={m} onClick={() => setChMetric(m as ChallengeMetric)}
+                      className={`py-2.5 rounded-xl border text-[10px] font-bold flex flex-col items-center gap-1 transition-all ${chMetric === m ? 'bg-[#059669] border-[#10B981] text-white' : 'bg-black/20 border-white/10 text-[#A7F3D0]/60'}`}>
+                      {icon}<span className="leading-tight text-center">{label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-[#A7F3D0]/50 uppercase tracking-widest">{tc.target}</label>
+                    <input type="number" min={1} value={chTarget} onChange={(e) => setChTarget(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full mt-1.5 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:outline-none focus:border-[#FCD34D]" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-[#A7F3D0]/50 uppercase tracking-widest">{tc.duration} ({tc.days})</label>
+                    <input type="number" min={1} value={chDays} onChange={(e) => setChDays(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full mt-1.5 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:outline-none focus:border-[#FCD34D]" />
+                  </div>
+                </div>
+
+                <label className="text-[10px] font-bold text-[#A7F3D0]/50 uppercase tracking-widest">{tc.invite}</label>
+                {graph.friends.length === 0 ? (
+                  <p className="text-[11px] text-[#A7F3D0]/40 mt-1.5 mb-3">{tc.noFriendsInvite}</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 mt-1.5 mb-4">
+                    {graph.friends.map((f) => {
+                      const sel = chFriends.includes(f.profile.id);
+                      return (
+                        <button key={f.profile.id}
+                          onClick={() => setChFriends(prev => sel ? prev.filter(x => x !== f.profile.id) : [...prev, f.profile.id])}
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${sel ? 'bg-[#059669] border-[#10B981] text-white' : 'bg-black/20 border-white/10 text-[#A7F3D0]/70'}`}>
+                          {f.profile.display_name || f.profile.username}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <button onClick={submitChallenge} disabled={chBusy}
+                  className="w-full py-3.5 rounded-2xl bg-[#FCD34D] text-[#022C22] font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-50">
+                  {chBusy ? <Loader2 size={16} className="animate-spin" /> : <Trophy size={16} />} {tc.start}
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
     </div>,
   );
 }

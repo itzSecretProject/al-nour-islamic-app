@@ -68,6 +68,7 @@ export interface ReminderSettings {
   khatmahPagesRead: number;       // pages read so far
   khatmahReminder: boolean;       // daily push reminder for the day's pages
   khatmahReminderHour: number;    // 0–23 hour for the daily reminder
+  wbwHighlightColor: string;      // word-by-word active word highlight color (hex)
 }
 
 // Maturity model based on age. Under 15 (Islamic age of accountability / baligh)
@@ -156,6 +157,7 @@ export const DEFAULT_SETTINGS: ReminderSettings = {
   khatmahPagesRead: 0,
   khatmahReminder: true,
   khatmahReminderHour: 9,
+  wbwHighlightColor: '#FCD34D',
 };
 
 interface SettingsContextType {

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Sun, Moon, RotateCcw, Check, CheckCircle2 } from 'lucide-react';
+import { X, Sun, Moon, RotateCcw, Check, CheckCircle2, Volume2, VolumeX } from 'lucide-react';
 import { adhkar, Dhikr } from '../data/adhkar';
 import { useSettings } from '../hooks/useSettings';
 import { localDateKey } from '../context/SalahTrackerContext';
 import { useScrollLock } from '../utils/useScrollLock';
+import { speakArabic, stopSpeaking } from '../utils/speak';
 
 const T: Record<string, Record<string, string>> = {
   en: { title: 'Daily Adhkar', morning: 'Morning', evening: 'Evening', reset: 'Reset', times: 'times', completed: 'completed', allDone: 'Adhkar complete — may Allah accept it!', tapHint: 'Tap the count to add one' },
@@ -44,6 +45,15 @@ export function AdhkarScreen({ onClose }: Props) {
 
   const [session, setSession] = useState<Session>(() => (new Date().getHours() < 15 ? 'morning' : 'evening'));
   const [progress, setProgress] = useState<Progress>(loadProgress);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+
+  const toggleSpeak = (id: string, text: string) => {
+    if (speakingId === id) { stopSpeaking(); setSpeakingId(null); return; }
+    setSpeakingId(id);
+    speakArabic(text, () => setSpeakingId(null));
+  };
+
+  useEffect(() => () => stopSpeaking(), []);
 
   useEffect(() => {
     try {
@@ -161,6 +171,13 @@ export function AdhkarScreen({ onClose }: Props) {
                   <span className="text-[9px] font-bold text-[#A7F3D0]/50 uppercase tracking-widest flex-1 truncate">
                     {d.reference}
                   </span>
+                  <button
+                    onClick={() => toggleSpeak(d.id, d.arabic)}
+                    className={`p-2 rounded-xl transition-colors shrink-0 ${speakingId === d.id ? 'bg-[#FCD34D] text-[#022C22]' : 'bg-white/5 text-[#A7F3D0] hover:text-[#FCD34D]'}`}
+                    title="Listen"
+                  >
+                    {speakingId === d.id ? <VolumeX size={15} /> : <Volume2 size={15} />}
+                  </button>
                   <button
                     onClick={() => inc(d)}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl font-black text-sm tabular-nums active:scale-95 transition-all shrink-0 ${

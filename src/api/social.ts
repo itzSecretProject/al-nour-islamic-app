@@ -166,3 +166,114 @@ export async function unreadCount(uid: string): Promise<number> {
     .eq('read', false);
   return count || 0;
 }
+
+// ── Challenges ───────────────────────────────────────────────────────────────
+
+export type ChallengeMetric = 'streak' | 'memorized' | 'prayers_today';
+
+export interface Challenge {
+  id: string;
+  creator: string;
+  title: string;
+  metric: ChallengeMetric;
+  target: number;
+  ends_at: string | null;
+  created_at: string;
+}
+
+export interface ChallengeStanding {
+  profile: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>;
+  value: number; // the member's current value of the challenge metric
+}
+
+export interface ChallengeWithStandings extends Challenge {
+  standings: ChallengeStanding[];
+}
+
+const METRIC_COLUMN: Record<ChallengeMetric, string> = {
+  streak: 'current_streak',
+  memorized: 'total_memorized',
+  prayers_today: 'prayers_today',
+};
+
+export async function createChallenge(
+  uid: string,
+  title: string,
+  metric: ChallengeMetric,
+  target: number,
+  friendIds: string[],
+  durationDays: number,
+): Promise<{ error?: string; id?: string }> {
+  const ends_at = durationDays > 0
+    ? new Date(Date.now() + durationDays * 86400000).toISOString()
+    : null;
+  const { data, error } = await db()
+    .from('challenges')
+    .insert({ creator: uid, title, metric, target, ends_at })
+    .select('id')
+    .single();
+  if (error || !data) return { error: error?.message || 'create failed' };
+
+  const memberRows = [uid, ...friendIds].map(user_id => ({ challenge_id: data.id, user_id }));
+  const { error: mErr } = await db().from('challenge_members').insert(memberRows);
+  if (mErr) return { error: mErr.message };
+
+  for (const fid of friendIds) {
+    fetch('/api/push/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientId: fid, title: 'Al Nour', body: `🏆 ${title}` }),
+    }).catch(() => {});
+  }
+  return { id: data.id };
+}
+
+export async function loadChallenges(uid: string): Promise<ChallengeWithStandings[]> {
+  const { data: myMemberships } = await db()
+    .from('challenge_members')
+    .select('challenge_id')
+    .eq('user_id', uid);
+  const ids = (myMemberships || []).map((m: any) => m.challenge_id);
+  if (!ids.length) return [];
+
+  const { data: challenges } = await db()
+    .from('challenges')
+    .select('*')
+    .in('id', ids)
+    .order('created_at', { ascending: false });
+  if (!challenges) return [];
+
+  const { data: members } = await db()
+    .from('challenge_members')
+    .select('challenge_id, user_id')
+    .in('challenge_id', ids);
+  const memberIds = Array.from(new Set((members || []).map((m: any) => m.user_id)));
+
+  const { data: profiles } = memberIds.length
+    ? await db().from('profiles').select('id,username,display_name,avatar_url,current_streak,total_memorized,prayers_today').in('id', memberIds)
+    : { data: [] as any[] };
+  const byId = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+  return (challenges as Challenge[]).map((c) => {
+    const col = METRIC_COLUMN[c.metric];
+    const standings: ChallengeStanding[] = (members || [])
+      .filter((m: any) => m.challenge_id === c.id)
+      .map((m: any) => {
+        const p: any = byId.get(m.user_id);
+        return p
+          ? { profile: { id: p.id, username: p.username, display_name: p.display_name, avatar_url: p.avatar_url }, value: p[col] ?? 0 }
+          : null;
+      })
+      .filter(Boolean) as ChallengeStanding[];
+    standings.sort((a, b) => b.value - a.value);
+    return { ...c, standings };
+  });
+}
+
+export async function leaveChallenge(uid: string, challengeId: string, isCreator: boolean): Promise<void> {
+  if (isCreator) {
+    await db().from('challenges').delete().eq('id', challengeId);
+  } else {
+    await db().from('challenge_members').delete().eq('challenge_id', challengeId).eq('user_id', uid);
+  }
+}

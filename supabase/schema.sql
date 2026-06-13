@@ -207,3 +207,83 @@ create policy "delete own item"
 alter publication supabase_realtime add table public.shared_items;
 alter publication supabase_realtime add table public.friendships;
 alter publication supabase_realtime add table public.profiles;
+
+-- ============================================================================
+-- 4. CHALLENGES  (friendly group challenges — "who keeps the longest streak")
+--    Progress is read LIVE from each member's profile stats (no extra writes),
+--    so a challenge is just a definition + a membership list.
+-- ============================================================================
+create table if not exists public.challenges (
+  id          uuid primary key default gen_random_uuid(),
+  creator     uuid not null references public.profiles (id) on delete cascade,
+  title       text not null default '',
+  metric      text not null default 'streak'
+              check (metric in ('streak', 'memorized', 'prayers_today')),
+  target      int  not null default 7,
+  ends_at     timestamptz,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.challenge_members (
+  challenge_id uuid not null references public.challenges (id) on delete cascade,
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  joined_at    timestamptz not null default now(),
+  primary key (challenge_id, user_id)
+);
+
+create index if not exists challenge_members_user_idx on public.challenge_members (user_id);
+
+-- Is `uid` a member of challenge `cid`? (security definer so RLS can call it
+-- without recursing into challenge_members' own policies).
+create or replace function public.is_challenge_member(cid uuid, uid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.challenge_members m
+    where m.challenge_id = cid and m.user_id = uid
+  );
+$$;
+
+alter table public.challenges        enable row level security;
+alter table public.challenge_members enable row level security;
+
+-- ----- challenges -----
+drop policy if exists "see challenges i'm in" on public.challenges;
+create policy "see challenges i'm in"
+  on public.challenges for select to authenticated
+  using (public.is_challenge_member(id, auth.uid()) or creator = auth.uid());
+
+drop policy if exists "create challenge" on public.challenges;
+create policy "create challenge"
+  on public.challenges for insert to authenticated
+  with check (creator = auth.uid());
+
+drop policy if exists "creator deletes challenge" on public.challenges;
+create policy "creator deletes challenge"
+  on public.challenges for delete to authenticated
+  using (creator = auth.uid());
+
+-- ----- challenge_members -----
+drop policy if exists "see members of my challenges" on public.challenge_members;
+create policy "see members of my challenges"
+  on public.challenge_members for select to authenticated
+  using (public.is_challenge_member(challenge_id, auth.uid()));
+
+-- The creator can add members (invite friends); anyone can add THEMSELVES (join).
+drop policy if exists "add members" on public.challenge_members;
+create policy "add members"
+  on public.challenge_members for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    or auth.uid() = (select creator from public.challenges c where c.id = challenge_id)
+  );
+
+drop policy if exists "leave challenge" on public.challenge_members;
+create policy "leave challenge"
+  on public.challenge_members for delete to authenticated
+  using (
+    user_id = auth.uid()
+    or auth.uid() = (select creator from public.challenges c where c.id = challenge_id)
+  );
+
+alter publication supabase_realtime add table public.challenges;
+alter publication supabase_realtime add table public.challenge_members;
