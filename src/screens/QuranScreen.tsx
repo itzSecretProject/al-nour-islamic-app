@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { fetchAllSurahs, fetchSurahEditions, SurahMeta, SurahData, Ayah } from '../api/quran';
-import { ChevronLeft, Play, Pause, Loader2, Download, CheckCircle2, Repeat, Repeat1, Share2, Sparkles, Send } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Loader2, Download, CheckCircle2, Repeat, Repeat1, Share2, Sparkles, Send, Languages } from 'lucide-react';
+
+const WordByWordScreen = lazy(() => import('./WordByWordScreen').then(m => ({ default: m.WordByWordScreen })));
 import { motion, AnimatePresence } from 'motion/react';
 import { useSettings } from '../hooks/useSettings';
 import { translations, LANGUAGE_TRANSLATION_EDITIONS } from '../utils/translations';
@@ -116,6 +118,7 @@ export function QuranScreen() {
   const [downloadingSurah, setDownloadingSurah] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloaded, setIsDownloaded] = useState(false);
+  const [showWordByWord, setShowWordByWord] = useState(false);
 
   // Autoplay states & refs
   const [autoplay, setAutoplay] = useState(true);
@@ -566,6 +569,15 @@ export function QuranScreen() {
                 </div>
               )}
 
+              {/* Word-by-word reader entry */}
+              <button
+                onClick={() => setShowWordByWord(true)}
+                className="mb-5 mx-auto flex items-center gap-2 bg-[#FCD34D]/10 hover:bg-[#FCD34D]/20 border border-[#FCD34D]/30 text-[#FCD34D] py-2.5 px-5 rounded-2xl text-xs font-bold transition-all active:scale-95"
+              >
+                <Languages size={15} />
+                <span>{lang === 'es' ? 'Palabra por palabra' : lang === 'ar' ? 'كلمة بكلمة' : 'Word by word'}</span>
+              </button>
+
               {/* View options & Autoplay Toggle */}
               <div className="flex flex-wrap justify-center items-center gap-2.5 bg-[#022C22] p-1.5 rounded-2xl border border-[#065F46] w-fit shadow-inner mx-auto">
                 <button
@@ -679,6 +691,16 @@ export function QuranScreen() {
               );
             })}
           </div>
+        )}
+
+        {showWordByWord && selectedSurah && (
+          <Suspense fallback={null}>
+            <WordByWordScreen
+              surah={selectedSurah}
+              surahName={arabic?.englishName}
+              onClose={() => setShowWordByWord(false)}
+            />
+          </Suspense>
         )}
       </div>
     );
