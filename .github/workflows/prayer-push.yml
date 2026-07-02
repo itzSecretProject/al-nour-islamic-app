@@ -3,10 +3,13 @@ name: Prayer push trigger
 # Pings the push sender so background prayer notifications go out ON TIME.
 # Vercel Hobby crons only run once/day, so we trigger from GitHub Actions.
 #
-# GitHub's cron granularity is 5 minutes, which alone would delay prayers by
-# up to ~5 min. So each run LOOPS, pinging every 30s for its whole window —
-# back-to-back runs give continuous ~30-second delivery precision. The repo is
-# public, so Actions minutes are free; the sender dedups, so overlap is harmless.
+# GitHub heavily throttles high-frequency schedules on free repos — the `*/5`
+# cron here was observed firing only every 2-3 HOURS, leaving huge gaps where
+# no prayer push could be sent. So each run pings every 30s for ~5 min and then
+# DISPATCHES ITSELF (workflow_dispatch via the CHAIN_PAT secret), forming a
+# continuous chain independent of cron throttling. The cron stays only as a
+# restarter in case the chain ever breaks. The repo is public, so Actions
+# minutes are free; the sender dedups, so overlap is harmless.
 
 on:
   schedule:
@@ -29,3 +32,11 @@ jobs:
             curl -fsS --max-time 10 "https://al-nour-islamic-app.vercel.app/api/push/send" || true
             sleep 30
           done
+      - name: Chain next run
+        if: always()
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.CHAIN_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/prayer-push.yml/dispatches" \
+            -d '{"ref":"main"}' || true

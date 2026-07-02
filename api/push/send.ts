@@ -199,7 +199,10 @@ function buildServerSchedule(monthlyData: any[], record: PushRecord, now: number
 async function fetchAndRebuildSchedule(record: PushRecord, now: number): Promise<ScheduleEntry[] | null> {
   if (record.lat == null || record.lng == null) return null;
   try {
-    const method = record.method ?? 2;
+    // Fallback must match the app's default (SettingsContext calculationMethod = 18,
+    // Tunisia). The old fallback of 2 (ISNA) rebuilt schedules with Fajr ~25-30 min
+    // later than the times shown in the app.
+    const method = record.method ?? 18;
     const months: any[] = [];
     let tz = '';
     const d = new Date(now);
@@ -397,6 +400,9 @@ export default async function handler(req: any, res: any) {
         next: future[0] ? new Date(future[0].ts).toISOString() : null,
         nextPrayer: future[0]?.prayer ?? null,
         hasCoords: record.lat != null && record.lng != null,
+        method: record.method ?? null,
+        // Next few entries so stored times can be checked against the app/masjid.
+        upcoming: future.slice(0, 8).map(e => `${e.prayer}@${new Date(e.ts).toISOString().slice(11, 16)}Z`),
       });
     }
 

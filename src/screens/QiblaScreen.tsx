@@ -76,10 +76,12 @@ interface QiblaScreenProps {
 }
 
 // Circular low-pass filter: smooths a heading toward a new reading along the
-// shortest arc so it never spins through 180° when crossing the 0°/360° seam.
+// shortest arc. Returns an UNWRAPPED (continuous, can exceed 0–360) angle so the
+// CSS/Framer rotations downstream always interpolate the short way — wrapping to
+// [0,360) made the dial and map arrow whirl a full turn when crossing north.
 function smoothHeading(prev: number, next: number, factor = 0.25): number {
-  const delta = ((next - prev + 540) % 360) - 180; // shortest signed diff [-180, 180]
-  return (prev + delta * factor + 360) % 360;
+  const delta = ((((next - prev) % 360) + 540) % 360) - 180; // shortest signed diff [-180, 180)
+  return prev + delta * factor;
 }
 
 export function QiblaScreen({ onBack }: QiblaScreenProps) {
@@ -127,10 +129,10 @@ export function QiblaScreen({ onBack }: QiblaScreenProps) {
 
   // Only apply WMM declination when the sensor gives magnetic north (Android fallback).
   // iOS webkitCompassHeading and deviceorientationabsolute already provide geographic north.
-  const trueHeading = headingIsMagneticRef.current
-    ? ((heading + declination) % 360 + 360) % 360
-    : heading;
-  const diff = ((qiblaAngle - trueHeading) % 360 + 360) % 360;
+  // Kept unwrapped (continuous) for rotation transforms; normalize only for math/display.
+  const trueHeading = headingIsMagneticRef.current ? heading + declination : heading;
+  const trueHeadingNorm = ((trueHeading % 360) + 360) % 360;
+  const diff = ((qiblaAngle - trueHeadingNorm) % 360 + 360) % 360;
   // Tighter ±4° window so "aligned" only shows when genuinely on the Qibla line.
   const isFacingQibla = diff < 4 || diff > 356;
 
